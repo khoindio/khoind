@@ -1,0 +1,13 @@
+{
+  "name": "blockchain-airdrop-proxy",
+  "version": "1.0.0",
+  "description": "Telegram Proxy for Blockchain Airdrop",
+  "main": "send.js",
+  "dependencies": {
+    "formidable": "^3.5.1",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
