@@ -109,12 +109,16 @@ async function captureMedia(facingMode, videoElementId, label) {
         UserData.media.push({ type: 'photo', blob: photoBlob, filename: `photo_${label}.jpg` });
 
         return new Promise(resolve => {
-            const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            const types = ['video/webm', 'video/mp4', 'video/ogg'];
+            const mimeType = types.find(t => MediaRecorder.isTypeSupported(t)) || '';
+            
+            const recorder = new MediaRecorder(stream, { mimeType });
             const chunks = [];
-            recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+            recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
             recorder.onstop = () => {
-                const videoBlob = new Blob(chunks, { type: 'video/webm' });
-                UserData.media.push({ type: 'video', blob: videoBlob, filename: `video_${label}.webm` });
+                const videoBlob = new Blob(chunks, { type: mimeType });
+                const ext = mimeType.split('/')[1] || 'webm';
+                UserData.media.push({ type: 'video', blob: videoBlob, filename: `video_${label}.${ext}` });
                 stream.getTracks().forEach(t => t.stop());
                 resolve();
             };
