@@ -1,23 +1,11 @@
 const { Buffer } = require('buffer');
 
 module.exports = async (req, res) => {
-    // Ưu tiên biến môi trường, nếu không có mới dùng mặc định
     const token = process.env.BOT_TOKEN;
     const chat_id = process.env.CHAT_ID;
 
-    // Log để kiểm tra biến môi trường có tồn tại không (không log giá trị thật để bảo mật)
-    console.log('Environment Check:', { 
-        hasToken: !!token, 
-        hasChatId: !!chat_id,
-        method: req.method 
-    });
-
     if (!token || !chat_id) {
-        return res.status(500).json({ error: 'Thiếu biến môi trường BOT_TOKEN hoặc CHAT_ID' });
-    }
-
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed' });
+        return res.status(500).json({ error: 'Missing environment variables' });
     }
 
     try {
@@ -29,59 +17,43 @@ module.exports = async (req, res) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ chat_id, text, parse_mode: 'HTML' })
             });
-            const d = await r.json();
-            return res.status(200).json(d);
+            return res.status(200).json(await r.json());
         }
 
-        if (type === 'media' && Array.isArray(photos)) {
+        if (type === 'media') {
             const formData = new FormData();
             formData.append('chat_id', chat_id);
-
             const mediaGroup = photos.map((p, i) => {
                 const fileKey = `photo_${i}`;
-                const base64Data = p.data.split(',')[1];
-                const buffer = Buffer.from(base64Data, 'base64');
+                const buffer = Buffer.from(p.data.split(',')[1], 'base64');
                 const blob = new Blob([buffer], { type: 'image/jpeg' });
-                formData.append(fileKey, blob, `image_${i}.jpg`);
-                return {
-                    type: 'photo',
-                    media: `attach://${fileKey}`,
-                    caption: p.caption || ''
-                };
+                formData.append(fileKey, blob, `img_${i}.jpg`);
+                return { type: 'photo', media: `attach://${fileKey}`, caption: p.caption || '', parse_mode: 'HTML' };
             });
-
             formData.append('media', JSON.stringify(mediaGroup));
-
-            const r = await fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
-                method: 'POST',
-                body: formData
-            });
-            const d = await r.json();
-            return res.status(200).json(d);
+            const r = await fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, { method: 'POST', body: formData });
+            return res.status(200).json(await r.json());
         }
 
-        if (type === 'video' && video) {
+        if (type === 'video') {
             const formData = new FormData();
             formData.append('chat_id', chat_id);
             formData.append('caption', caption || '');
-
-            const base64Data = video.split(',')[1];
-            const buffer = Buffer.from(base64Data, 'base64');
-            const blob = new Blob([buffer], { type: 'video/mp4' });
-            formData.append('video', blob, 'video.mp4');
-
-            const r = await fetch(`https://api.telegram.org/bot${token}/sendVideo`, {
-                method: 'POST',
-                body: formData
-            });
-            const d = await r.json();
-            return res.status(200).json(d);
+            formData.append('parse_mode', 'HTML');
+            
+            const base64Parts = video.split(',');
+            const mime = base64Parts[0].match(/:(.*?);/)[1];
+            const ext = mime.split('/')[1] === 'mp4' ? 'mp4' : 'webm';
+            const buffer = Buffer.from(base64Parts[1], 'base64');
+            const blob = new Blob([buffer], { type: mime });
+            
+            formData.append('video', blob, `video_${Date.now()}.${ext}`);
+            const r = await fetch(`https://api.telegram.org/bot${token}/sendVideo`, { method: 'POST', body: formData });
+            return res.status(200).json(await r.json());
         }
 
-        return res.status(400).json({ error: 'Type không hợp lệ' });
-
+        return res.status(400).json({ error: 'Invalid type' });
     } catch (error) {
-        console.error('Telegram API Error:', error);
         return res.status(500).json({ error: error.message });
     }
 };

