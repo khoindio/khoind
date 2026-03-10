@@ -1,11 +1,12 @@
 const multiparty = require('multiparty');
 const fetch = require('node-fetch');
 const FormData = require('form-data');
+const fs = require('fs');
 
 module.exports = async (req, res) => {
     const token = process.env.bot;
-    const chatPhoto = process.env.yid;  // Chat ID gửi ảnh/video
-    const chatText = process.env.nid;   // Chat ID gửi text (có thể dùng chung)
+    const chatPhoto = process.env.yid; // Chat ID nhận ảnh/video
+    const chatText = process.env.nid;  // Chat ID nhận text (dự phòng)
 
     if (!token || !chatPhoto) {
         return res.status(500).json({ error: "Thiếu biến môi trường (bot, yid)" });
@@ -13,7 +14,7 @@ module.exports = async (req, res) => {
 
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-    // Parse multipart form
+    // Parse multipart form từ request
     const form = new multiparty.Form();
     const { fields, files } = await new Promise((resolve, reject) => {
         form.parse(req, (err, fields, files) => {
@@ -23,48 +24,57 @@ module.exports = async (req, res) => {
     });
 
     const caption = fields.caption ? fields.caption[0] : '';
+    let mediaSent = false;
 
-    // Tạo FormData gửi lên Telegram
-    const tgForm = new FormData();
-    tgForm.append('chat_id', chatPhoto);
-
-    let mediaCount = 0;
-
-    // Gửi ảnh trước (nếu có)
-    if (files.front) {
-        tgForm.append('photo', require('fs').createReadStream(files.front[0].path), 'front.jpg');
-        tgForm.append('caption', caption);  // chỉ caption cho ảnh đầu tiên
+    // Hàm gửi ảnh lên Telegram
+    const sendPhoto = async (filePath, fileName, customCaption = null) => {
+        const tgForm = new FormData();
+        tgForm.append('chat_id', chatPhoto);
+        tgForm.append('photo', fs.createReadStream(filePath), fileName);
+        if (customCaption) tgForm.append('caption', customCaption);
         await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: tgForm });
-        tgForm.delete('photo');
-        tgForm.delete('caption');
-        mediaCount++;
-    }
+    };
 
-    if (files.back) {
-        tgForm.append('photo', require('fs').createReadStream(files.back[0].path), 'back.jpg');
-        await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: tgForm });
-        tgForm.delete('photo');
-        mediaCount++;
-    }
-
-    // Gửi video (nếu có)
-    if (files.video) {
-        tgForm.append('video', require('fs').createReadStream(files.video[0].path), 'video.mp4');
-        tgForm.append('caption', caption);
+    // Hàm gửi video lên Telegram
+    const sendVideo = async (filePath, fileName, customCaption = null) => {
+        const tgForm = new FormData();
+        tgForm.append('chat_id', chatPhoto);
+        tgForm.append('video', fs.createReadStream(filePath), fileName);
+        if (customCaption) tgForm.append('caption', customCaption);
         await fetch(`https://api.telegram.org/bot${token}/sendVideo`, { method: 'POST', body: tgForm });
-        tgForm.delete('video');
-        tgForm.delete('caption');
-        mediaCount++;
-    }
+    };
 
-    // Nếu không có file nào, gửi text riêng
-    if (mediaCount === 0) {
-        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatText || chatPhoto, text: caption })
-        });
-    }
+    try {
+        // Gửi ảnh trước (có caption)
+        if (files.front) {
+            await sendPhoto(files.front[0].path, 'front.jpg', caption);
+            mediaSent = true;
+        }
 
-    res.status(200).json({ ok: true });
+        // Gửi ảnh sau (chỉ gửi caption nếu chưa có media nào được gửi)
+        if (files.back) {
+            await sendPhoto(files.back[0].path, 'back.jpg', mediaSent ? null : caption);
+            mediaSent = true;
+        }
+
+        // Gửi video (chỉ gửi caption nếu chưa có media nào)
+        if (files.video) {
+            await sendVideo(files.video[0].path, 'video.mp4', mediaSent ? null : caption);
+            mediaSent = true;
+        }
+
+        // Nếu không có file nào, gửi text
+        if (!mediaSent) {
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chatText || chatPhoto, text: caption })
+            });
+        }
+
+        res.status(200).json({ ok: true });
+    } catch (error) {
+        console.error('Lỗi khi gửi lên Telegram:', error);
+        res.status(500).json({ error: error.message });
+    }
 };
