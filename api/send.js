@@ -1,4 +1,12 @@
+const API_SECRET = 'KHOIND_SECURE_TOKEN_2026';
+
 module.exports = async (req, res) => {
+    // 1. Bảo mật API: Kiểm tra Secret Key
+    const clientKey = req.headers['x-secure-key'];
+    if (clientKey !== API_SECRET) {
+        return res.status(403).json({ error: "Forbidden: Truy cap bi tu choi" });
+    }
+
     const token = process.env.bot;    
     const chatPhoto = process.env.yid; 
     const chatText = process.env.nid;  
@@ -12,7 +20,6 @@ module.exports = async (req, res) => {
     try {
         const { type, media, text, caption } = req.body;
 
-        // Xử lý gửi Text
         if (type === 'text') {
             const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
                 method: 'POST',
@@ -22,7 +29,6 @@ module.exports = async (req, res) => {
             return res.status(200).json(await r.json());
         }
 
-        // Xử lý gửi Ảnh (Media Group)
         if (type === 'media' && Array.isArray(media)) {
             const formData = new FormData();
             formData.append('chat_id', chatPhoto); 
@@ -52,7 +58,6 @@ module.exports = async (req, res) => {
             return res.status(200).json(await r.json());
         }
 
-        // Xử lý gửi Video (Nhận từ luồng mới thêm vào)
         if (type === 'video' && media) {
             const formData = new FormData();
             formData.append('chat_id', chatPhoto);

