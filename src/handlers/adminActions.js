@@ -2,6 +2,7 @@ const config = require('../config');
 const orderService = require('../services/orderService');
 const productService = require('../services/productService');
 const userService = require('../services/userService');
+const voucherService = require('../services/voucherService');
 const { deliverOrder } = require('./paymentConfirm');
 const { formatPrice } = require('../utils/keyboard');
 const { Markup } = require('telegraf');
@@ -12,7 +13,7 @@ const path = require('path');
 const adminState = {};
 
 function isAdmin(ctx) {
-    return config.ADMIN_IDS.includes(ctx.from.id);
+    return ctx.from.id === config.ADMIN_ID;
 }
 
 function adminOnly(ctx, next) {
@@ -44,10 +45,9 @@ module.exports = (bot) => {
             `/editprice [ID] [giá] — Sửa giá\n` +
             `/editname [ID] [tên] — Sửa tên\n` +
             `/toggleproduct [ID] — Bật/tắt sản phẩm\n` +
-            `/togglefile [ID] — Bật/tắt chế độ File\n` +
             `/deleteproduct [ID] — Xóa sản phẩm\n\n` +
             `📋 <b>QUẢN LÝ KHO:</b>\n` +
-            `/addstock [ID] — Thêm KEY vào kho\n` +
+            `/addstock [ID] — Thêm tài khoản vào kho\n` +
             `/viewstock [ID] — Xem kho sản phẩm\n` +
             `/clearstock [ID] — Xóa toàn bộ kho (chưa bán)\n\n` +
             `💰 <b>ĐƠN HÀNG & THANH TOÁN:</b>\n` +
@@ -55,23 +55,22 @@ module.exports = (bot) => {
             `/confirm [orderID] — Xác nhận & giao hàng\n` +
             `/cancelorder [orderID] — Hủy đơn\n` +
             `/orders — Xem tất cả đơn hàng\n\n` +
-            `👤 <b>NGƯỜI DÙNG:</b>\n` +
-            `/userinfo [ID/@user] — Tìm & quản lý user\n` +
-            `/users — Xem users mới nhất\n` +
-            `/send [ID/@user] [Nội dung] — Gửi thông báo tới 1 user\n` +
-            `/broadcast — Gửi thông báo tới all users\n\n` +
-            `🎫 <b>KHUYẾN MÃI:</b>\n` +
-            `/addpromo [Mã] [Tiền] [Lượt] — Tạo mã Voucher\n\n` +
+            `🎁 <b>VOUCHER / GIFTCODE:</b>\n` +
+            `/addvoucher [code] [giá trị] [số lần] — Tạo mã\n` +
+            `/vouchers — Xem danh sách mã\n` +
+            `/deletevoucher [code] — Xóa mã\n\n` +
             `🏦 <b>CÀI ĐẶT:</b>\n` +
-            `/setbank — Xem/Sửa thông tin ngân hàng\n` +
-            `/setshop — Xem/Sửa thông tin shop\n` +
-            `/setwebapp — Cài đặt link Mini App\n\n` +
-            `📊 <b>BÁO CÁO & ĐỒNG BỘ:</b>\n` +
-            `/report — Doanh thu chi tiết\n` +
-            `/sync — Đồng bộ từ Google Sheet`,
+            `/setbank — Xem thông tin ngân hàng\n` +
+            `/setshop — Xem/sửa thông tin shop\n\n` +
+            `📊 <b>GOOGLE SHEET & KHÁC:</b>\n` +
+            `/sync — 🔄 Đồng bộ sản phẩm từ Google Sheet\n` +
+            `/stats — Thống kê chi tiết\n` +
+            `/users — Xem danh sách users\n` +
+            `/broadcast — Gửi thông báo tới all users\n` +
+            `/addmoney [ID] [số tiền] — Cộng tiền cho user\n` +
+            `/trutien [ID] [số tiền] — Trừ tiền của user`,
             Markup.inlineKeyboard([
                 [Markup.button.callback('📦 Sản phẩm', 'adm_products'), Markup.button.callback('⏳ Đơn chờ', 'adm_pending')],
-                [Markup.button.callback('📈 Báo cáo', 'adm_report'), Markup.button.callback('👤 Tìm User', 'adm_userinfo')],
                 [Markup.button.callback('🔄 Sync Sheet', 'adm_sync'), Markup.button.callback('📊 Thống kê', 'adm_stats')],
             ])
         );
@@ -81,134 +80,10 @@ module.exports = (bot) => {
     bot.action('adm_products', (ctx) => { if (isAdmin(ctx)) { ctx.answerCbQuery(); showProductList(ctx); } });
     bot.action('adm_pending', (ctx) => { if (isAdmin(ctx)) { ctx.answerCbQuery(); showPending(ctx); } });
     bot.action('adm_stats', (ctx) => { if (isAdmin(ctx)) { ctx.answerCbQuery(); showStats(ctx); } });
-    bot.action('adm_report', (ctx) => { if (isAdmin(ctx)) { ctx.answerCbQuery(); showReport(ctx); } });
-    bot.action('adm_userinfo', (ctx) => { if (isAdmin(ctx)) { ctx.answerCbQuery(); ctx.reply('🔍 Gõ <code>/userinfo [ID hoặc @username]</code> để tìm kiếm.', { parse_mode: 'HTML' }); } });
-    
     bot.action('adm_sync', async (ctx) => {
         if (!isAdmin(ctx)) return;
         ctx.answerCbQuery('🔄 Đang sync...');
         await runSync(ctx);
-    });
-
-    // /report - Revenue report
-    bot.command('report', adminOnly, (ctx) => {
-        showReport(ctx);
-    });
-
-    function showReport(ctx) {
-        const report = orderService.getRevenueReport();
-        
-        const formatBuyers = (buyers) => {
-            if (!buyers || buyers.length === 0) return ' (Chưa có khách)';
-            const names = buyers.map(b => {
-                const username = b.username ? ` (@${b.username})` : '';
-                return `${b.full_name}${username} (${b.products})`;
-            }).join(', ');
-            return `\n└ 👥 Khách: <i>${names}</i>`;
-        };
-
-        ctx.replyWithHTML(
-            `📈 <b>BÁO CÁO DOANH THU</b>\n\n` +
-            `📅 <b>Hôm nay:</b>\n` +
-            `├ Đơn: ${report.today.count}\n` +
-            `├ Tiền: <b>${formatPrice(report.today.total)}</b>` + 
-            formatBuyers(report.today.buyers) + `\n\n` +
-
-            `📅 <b>Hôm qua:</b>\n` +
-            `├ Đơn: ${report.yesterday.count}\n` +
-            `├ Tiền: <b>${formatPrice(report.yesterday.total)}</b>` +
-            formatBuyers(report.yesterday.buyers) + `\n\n` +
-
-            `📅 <b>7 ngày qua:</b>\n` +
-            `├ Đơn: ${report.thisWeek.count}\n` +
-            `├ Tiền: <b>${formatPrice(report.thisWeek.total)}</b>` +
-            formatBuyers(report.thisWeek.buyers) + `\n\n` +
-
-            `📅 <b>30 ngày qua:</b>\n` +
-            `├ Đơn: ${report.thisMonth.count}\n` +
-            `└ Tiền: <b>${formatPrice(report.thisMonth.total)}</b>` +
-            formatBuyers(report.thisMonth.buyers)
-        );
-    }
-
-    // /userinfo [ID/@username]
-    bot.command('userinfo', adminOnly, (ctx) => {
-        const args = ctx.message.text.split(' ');
-        if (args.length < 2) return ctx.reply('Cách dùng: /userinfo [ID hoặc @username]');
-
-        const query = args[1];
-        let user = null;
-
-        if (query.startsWith('@')) {
-            user = userService.getByUsername(query);
-        } else if (!isNaN(query)) {
-            user = userService.get(parseInt(query));
-        }
-
-        if (!user) return ctx.reply('❌ Không tìm thấy người dùng này.');
-
-        const fullStats = userService.getFullStats(user.telegram_id);
-        
-        const text = 
-            `👤 <b>THÔNG TIN NGƯỜI DÙNG</b>\n\n` +
-            `🆔 ID: <code>${user.telegram_id}</code>\n` +
-            `👤 Tên: ${user.full_name}\n` +
-            `📱 Username: ${user.username ? '@' + user.username : 'N/A'}\n` +
-            `💰 Số dư: <b>${formatPrice(user.balance)}</b>\n` +
-            `📦 Đã mua: ${fullStats.total_orders} đơn\n` +
-            `💸 Tổng tiêu: ${formatPrice(fullStats.total_spent)}\n` +
-            `📅 Tham gia: ${user.created_at}\n` +
-            `🚫 Trạng thái: ${user.is_blocked ? '🔴 Đã chặn' : '🟢 Hoạt động'}`;
-
-        ctx.replyWithHTML(text, Markup.inlineKeyboard([
-            [
-                Markup.button.callback('💰 Cộng tiền', `usr_add_${user.telegram_id}`),
-                Markup.button.callback('💸 Trừ tiền', `usr_sub_${user.telegram_id}`)
-            ],
-            [
-                Markup.button.callback(user.is_blocked ? '🔓 Bỏ chặn' : '🚫 Chặn User', `usr_block_${user.telegram_id}`),
-                Markup.button.callback('📜 Đơn hàng', `usr_orders_${user.telegram_id}`)
-            ]
-        ]));
-    });
-
-    // User management actions
-    bot.action(/^usr_add_(\d+)$/, (ctx) => {
-        if (!isAdmin(ctx)) return;
-        const targetId = ctx.match[1];
-        adminState[ctx.from.id] = { action: 'user_add_bal', targetId };
-        ctx.reply('👇 Nhập số tiền muốn CỘNG cho user này (Gõ /cancel để hủy):');
-        ctx.answerCbQuery();
-    });
-
-    bot.action(/^usr_sub_(\d+)$/, (ctx) => {
-        if (!isAdmin(ctx)) return;
-        const targetId = ctx.match[1];
-        adminState[ctx.from.id] = { action: 'user_sub_bal', targetId };
-        ctx.reply('👇 Nhập số tiền muốn TRỪ của user này (Gõ /cancel để hủy):');
-        ctx.answerCbQuery();
-    });
-
-    bot.action(/^usr_block_(\d+)$/, (ctx) => {
-        if (!isAdmin(ctx)) return;
-        const targetId = parseInt(ctx.match[1]);
-        const newState = userService.toggleBlock(targetId);
-        ctx.answerCbQuery(newState ? '🔴 Đã chặn' : '🟢 Đã bỏ chặn');
-        ctx.reply(`✅ Đã ${newState ? 'CHẶN' : 'BỎ CHẶN'} người dùng <code>${targetId}</code>`, { parse_mode: 'HTML' });
-    });
-
-    bot.action(/^usr_orders_(\d+)$/, (ctx) => {
-        if (!isAdmin(ctx)) return;
-        const targetId = parseInt(ctx.match[1]);
-        const orders = orderService.getRecentByUser(targetId, 10);
-        if (orders.length === 0) return ctx.reply('User này chưa có đơn hàng nào.');
-        
-        let text = `📜 <b>ĐƠN HÀNG GẦN ĐÂY (ID:${targetId})</b>\n\n`;
-        orders.forEach(o => {
-            text += `#${o.id} | ${o.product_name} | ${formatPrice(o.total_price)} | ${o.status}\n`;
-        });
-        ctx.replyWithHTML(text);
-        ctx.answerCbQuery();
     });
 
     // /sync - Manual sync from Google Sheet
@@ -271,7 +146,7 @@ module.exports = (bot) => {
                 `Cách dùng:\n` +
                 `<code>/addproduct catID | tên | giá</code>\n\n` +
                 `Ví dụ:\n` +
-                `<code>/addproduct 1 | Tên Hack | 10000</code>\n\n` +
+                `<code>/addproduct 1 | KEY | 10000</code>\n\n` +
                 `📂 <b>Danh mục:</b>\n${catList}\n\n` +
                 `💡 Thêm danh mục: <code>/addcategory tên | emoji</code>`
             );
@@ -298,7 +173,7 @@ module.exports = (bot) => {
         const parts = argsText.split('|').map((s) => s.trim());
 
         if (parts.length < 1 || !parts[0]) {
-            return ctx.replyWithHTML('Cách dùng: <code>/addcategory tên | emoji</code>\nVí dụ: <code>/addcategory Tên Hack | 🎬</code>');
+            return ctx.replyWithHTML('Cách dùng: <code>/addcategory tên | emoji</code>\nVí dụ: <code>/addcategory KEY | 🎬</code>');
         }
 
         const name = parts[0];
@@ -334,7 +209,7 @@ module.exports = (bot) => {
     bot.command('editname', adminOnly, (ctx) => {
         const match = ctx.message.text.match(/^\/editname\s+(\d+)\s+(.+)$/);
         if (!match) {
-            return ctx.replyWithHTML('Cách dùng: <code>/editname [productID] [tên mới]</code>\nVí dụ: <code>/editname 1 Tên Hack</code>');
+            return ctx.replyWithHTML('Cách dùng: <code>/editname [productID] [tên mới]</code>\nVí dụ: <code>/editname 1 KEY</code>');
         }
 
         const productId = parseInt(match[1]);
@@ -378,46 +253,9 @@ module.exports = (bot) => {
         if (!product) return ctx.reply('❌ Sản phẩm không tồn tại');
 
         const db = require('../database');
-        
-        try {
-            // Check if product has sold items or orders
-            const soldCount = db.prepare('SELECT COUNT(*) as c FROM stock WHERE product_id = ? AND is_sold = 1').get(productId).c;
-            const orderCount = db.prepare('SELECT COUNT(*) as c FROM orders WHERE product_id = ?').get(productId).c;
-
-            if (soldCount > 0 || orderCount > 0) {
-                return ctx.replyWithHTML(
-                    `❌ <b>Không thể xóa sản phẩm này!</b>\n\n` +
-                    `Sản phẩm <b>${product.name}</b> đã có lịch sử bán hàng (${orderCount} đơn hàng).\n\n` +
-                    `💡 <b>Giải pháp:</b> Hãy sử dụng lệnh <code>/toggleproduct ${productId}</code> để TẮT sản phẩm này thay vì xóa để giữ lại lịch sử đơn hàng.`
-                );
-            }
-
-            // If no history, proceed to delete
-            db.prepare('DELETE FROM stock WHERE product_id = ? AND is_sold = 0').run(productId);
-            db.prepare('DELETE FROM products WHERE id = ?').run(productId);
-            ctx.replyWithHTML(`🗑️ Đã xóa sản phẩm: <b>${product.name}</b>`);
-        } catch (err) {
-            console.error('Delete product error:', err);
-            ctx.reply('❌ Lỗi khi xóa sản phẩm: ' + err.message);
-        }
-    });
-
-    // /togglefile [ID] - Toggle file mode
-    bot.command('togglefile', adminOnly, (ctx) => {
-        const args = ctx.message.text.split(' ');
-        if (args.length < 2) return ctx.replyWithHTML('Cách dùng: <code>/togglefile [productID]</code>');
-
-        const productId = parseInt(args[1]);
-        const product = productService.getById(productId);
-        if (!product) return ctx.reply('❌ Sản phẩm không tồn tại');
-
-        const db = require('../database');
-        // Treat undefined as 0 since old products won't have it explicitly set yet if queried by object
-        const currentValue = product.is_file === undefined ? 0 : product.is_file;
-        const newValue = currentValue ? 0 : 1;
-        db.prepare('UPDATE products SET is_file = ? WHERE id = ?').run(newValue, productId);
-        
-        ctx.replyWithHTML(`🔄 Đã chuyển sản phẩm <b>${product.name}</b> thành dạng: ${newValue ? '<b>FILE/DOCUMENT</b>' : '<b>TEXT/KEY</b>'}`);
+        db.prepare('DELETE FROM stock WHERE product_id = ? AND is_sold = 0').run(productId);
+        db.prepare('DELETE FROM products WHERE id = ?').run(productId);
+        ctx.replyWithHTML(`🗑️ Đã xóa sản phẩm: <b>${product.name}</b>`);
     });
 
     // ═══════════════════════════════════════
@@ -434,7 +272,7 @@ module.exports = (bot) => {
             return ctx.replyWithHTML(
                 `📦 <b>THÊM KEY VÀO KHO</b>\n\n` +
                 `Cách dùng: <code>/addstock [productID]</code>\n\n` +
-                `Sau đó gửi danh sách KEY (mỗi dòng 1 cái).\n\n` +
+                `Sau đó gửi danh sách <b>KEY</b> (mỗi dòng 1 cái).\n\n` +
                 `📋 <b>Sản phẩm:</b>\n${list}`
             );
         }
@@ -446,9 +284,9 @@ module.exports = (bot) => {
         // Set admin waiting state
         adminState[ctx.from.id] = { action: 'addstock', productId };
         ctx.replyWithHTML(
-            `📦 Thêm KEY cho: <b>${product.name}</b>\n` +
+            `📦 Thêm <b>KEY</b> cho: <b>${product.name}</b>\n` +
             `📊 Kho hiện tại: ${product.stock_count}\n\n` +
-            `👇 Gửi danh sách KEY ngay bây giờ (mỗi dòng 1 cái):\n\n` +
+            `👇 Gửi danh sách <b>KEY</b> ngay bây giờ (mỗi dòng 1 cái):\n\n` +
             `<i>Ví dụ:</i>\n` +
             `<code>KEY\nKEY</code>\n\n` +
             `Gõ /cancel để hủy.`
@@ -469,26 +307,18 @@ module.exports = (bot) => {
         if (!product) return ctx.reply('❌ Sản phẩm không tồn tại');
 
         const db = require('../database');
-        const items = db.prepare('SELECT * FROM stock WHERE product_id = ? AND is_sold = 0').all(productId);
+        const items = db.prepare('SELECT * FROM stock WHERE product_id = ? AND is_sold = 0 LIMIT 20').all(productId);
 
         if (items.length === 0) {
             return ctx.replyWithHTML(`📦 <b>${product.name}</b>\n\n❌ Kho trống!`);
         }
 
         let text = `📦 <b>${product.name}</b> — ${product.stock_count} sản phẩm\n\n`;
-        let displayedCount = 0;
-
-        for (let i = 0; i < items.length; i++) {
-            const itemText = `${i + 1}. <code>${items[i].data}</code>\n`;
-            
-            // Check if adding this item would exceed Telegram's 4096 char limit (with some buffer)
-            if (text.length + itemText.length > 3900) {
-                text += `\n⚠️ <i>Danh sách quá dài, chỉ hiển thị ${displayedCount}/${items.length} sản phẩm đầu tiên...</i>`;
-                break;
-            }
-            
-            text += itemText;
-            displayedCount++;
+        items.forEach((item, i) => {
+            text += `${i + 1}. <code>${item.data}</code>\n`;
+        });
+        if (product.stock_count > 20) {
+            text += `\n... và ${product.stock_count - 20} sản phẩm khác`;
         }
 
         ctx.replyWithHTML(text);
@@ -505,7 +335,7 @@ module.exports = (bot) => {
 
         const db = require('../database');
         const result = db.prepare('DELETE FROM stock WHERE product_id = ? AND is_sold = 0').run(productId);
-        ctx.replyWithHTML(`🗑️ Đã xóa <b>${result.changes}</b> KEY chưa bán khỏi <b>${product.name}</b>`);
+        ctx.replyWithHTML(`🗑️ Đã xóa <b>${result.changes}</b> <b>KEY</b> chưa bán khỏi <b>${product.name}</b>`);
     });
 
     // ═══════════════════════════════════════
@@ -571,44 +401,16 @@ module.exports = (bot) => {
     // CÀI ĐẶT THANH TOÁN / SHOP
     // ═══════════════════════════════════════
 
-    // /setbank - View or Edit bank info
+    // /setbank - View bank info (fixed to Techcombank)
     bot.command('setbank', adminOnly, (ctx) => {
-        const argsText = ctx.message.text.replace('/setbank', '').trim();
-
-        if (!argsText) {
-            return ctx.replyWithHTML(
-                `🏦 <b>THÔNG TIN NGÂN HÀNG</b>\n\n` +
-                `├ Ngân hàng: <b>${config.BANK.NAME}</b>\n` +
-                `├ BIN: <code>${config.BANK.BIN}</code>\n` +
-                `├ Số TK: <code>${config.BANK.ACCOUNT}</code>\n` +
-                `└ Chủ TK: <b>${config.BANK.ACCOUNT_NAME}</b>\n\n` +
-                `✏️ Để sửa:\n` +
-                `<code>/setbank BIN | SốTK | TênChủTK | TênNgânHàng</code>\n\n` +
-                `💡 Tra mã BIN tại: vietqr.io/danh-sach-ngan-hang`
-            );
-        }
-
-        const parts = argsText.split('|').map((s) => s.trim());
-        if (parts.length < 4) return ctx.reply('❌ Cú pháp thiếu. Cần đủ 4 thông tin: BIN | SốTK | TênChủTK | TênNH');
-
-        const [bin, account, accName, bankName] = parts;
-
-        const envPath = path.join(__dirname, '..', '..', '.env');
-        if (fs.existsSync(envPath)) {
-            let envContent = fs.readFileSync(envPath, 'utf8');
-            envContent = envContent.replace(/BANK_BIN=.*/, `BANK_BIN=${bin}`);
-            envContent = envContent.replace(/BANK_ACCOUNT=.*/, `BANK_ACCOUNT=${account}`);
-            envContent = envContent.replace(/BANK_ACCOUNT_NAME=.*/, `BANK_ACCOUNT_NAME=${accName}`);
-            envContent = envContent.replace(/BANK_NAME=.*/, `BANK_NAME=${bankName}`);
-            fs.writeFileSync(envPath, envContent);
-        }
-
-        config.BANK.BIN = bin;
-        config.BANK.ACCOUNT = account;
-        config.BANK.ACCOUNT_NAME = accName;
-        config.BANK.NAME = bankName;
-
-        ctx.replyWithHTML(`✅ Đã cập nhật ngân hàng:\n├ ${bankName}\n├ ${account}\n└ ${accName}`);
+        ctx.replyWithHTML(
+            `🏦 <b>THÔNG TIN NGÂN HÀNG</b>\n\n` +
+            `├ Ngân hàng: <b>${config.BANK.NAME}</b>\n` +
+            `├ BIN: <code>${config.BANK.BIN}</code>\n` +
+            `├ Số TK: <code>${config.BANK.ACCOUNT}</code>\n` +
+            `└ Chủ TK: <b>${config.BANK.ACCOUNT_NAME}</b>\n\n` +
+            `✅ QR VietQR thanh toán sử dụng thông tin trên.`
+        );
     });
 
     // /setshop - Edit shop name & support
@@ -630,93 +432,15 @@ module.exports = (bot) => {
         const support = parts[1] || config.SUPPORT_CONTACT;
 
         const envPath = path.join(__dirname, '..', '..', '.env');
-        if (fs.existsSync(envPath)) {
-            let envContent = fs.readFileSync(envPath, 'utf8');
-            envContent = envContent.replace(/SHOP_NAME=.*/, `SHOP_NAME=${shopName}`);
-            envContent = envContent.replace(/SUPPORT_CONTACT=.*/, `SUPPORT_CONTACT=${support}`);
-            fs.writeFileSync(envPath, envContent);
-        }
+        let envContent = fs.readFileSync(envPath, 'utf8');
+        envContent = envContent.replace(/SHOP_NAME=.*/, `SHOP_NAME=${shopName}`);
+        envContent = envContent.replace(/SUPPORT_CONTACT=.*/, `SUPPORT_CONTACT=${support}`);
+        fs.writeFileSync(envPath, envContent);
 
         config.SHOP_NAME = shopName;
         config.SUPPORT_CONTACT = support;
 
         ctx.replyWithHTML(`✅ Đã cập nhật:\n├ Shop: <b>${shopName}</b>\n└ Hỗ trợ: ${support}`);
-    });
-
-    // /setwebapp [URL] - Set Telegram Mini App URL
-    bot.command('setwebapp', adminOnly, async (ctx) => {
-        const url = ctx.message.text.replace('/setwebapp', '').trim();
-
-        if (!url) {
-            return ctx.replyWithHTML(
-                `📱 <b>CÀI ĐẶT MINI APP</b>\n\n` +
-                `URL hiện tại: <code>${config.WEBAPP_URL || 'Chưa cài đặt'}</code>\n\n` +
-                `✏️ Để cài đặt link mới:\n` +
-                `<code>/setwebapp https://your-domain.com/webapp</code>\n\n` +
-                `💡 <i>Lưu ý: Link phải bắt đầu bằng https://</i>\n` +
-                `🗑 Gõ <code>/setwebapp none</code> để xóa nút.`
-            );
-        }
-
-        // Handle clear/none
-        if (['none', 'clear', 'remove', 'delete'].includes(url.toLowerCase())) {
-            try {
-                const envPath = path.join(__dirname, '..', '..', '.env');
-                if (fs.existsSync(envPath)) {
-                    let envContent = fs.readFileSync(envPath, 'utf8');
-                    envContent = envContent.replace(/WEBAPP_URL=.*/, `WEBAPP_URL=`);
-                    fs.writeFileSync(envPath, envContent);
-                }
-                config.WEBAPP_URL = '';
-                
-                // Clear for this user specifically
-                await ctx.setChatMenuButton({ type: 'default' });
-                // Clear globally
-                await bot.telegram.callApi('setChatMenuButton', { menu_button: { type: 'default' } });
-                
-                return ctx.reply('✅ Đã xóa nút Mini App!');
-            } catch (err) {
-                return ctx.reply('❌ Lỗi: ' + err.message);
-            }
-        }
-
-        if (!url.startsWith('https://')) {
-            return ctx.reply('❌ URL của Web App phải bắt đầu bằng https:// để đảm bảo bảo mật của Telegram.');
-        }
-
-        try {
-            // Update .env file (Optional - might fail on Render/Cloud)
-            const envPath = path.join(__dirname, '..', '..', '.env');
-            if (fs.existsSync(envPath)) {
-                let envContent = fs.readFileSync(envPath, 'utf8');
-                if (envContent.includes('WEBAPP_URL=')) {
-                    envContent = envContent.replace(/WEBAPP_URL=.*/, `WEBAPP_URL=${url}`);
-                } else {
-                    envContent += `\nWEBAPP_URL=${url}`;
-                }
-                fs.writeFileSync(envPath, envContent);
-            }
-
-            // Update running config
-            config.WEBAPP_URL = url;
-
-            const menuButton = {
-                type: 'web_app',
-                text: 'Mở Shop',
-                web_app: { url: url }
-            };
-
-            // Set for current admin specifically
-            await ctx.setChatMenuButton(menuButton);
-
-            // Set globally
-            await bot.telegram.callApi('setChatMenuButton', { menu_button: menuButton });
-
-            ctx.replyWithHTML(`✅ <b>Thành công!</b>\nĐã cài đặt Mini App tại:\n<code>${url}</code>\n\nNút "Mở Shop" sẽ xuất hiện ở góc dưới bên trái ngay bây giờ.\n\n⚠️ <i>Lưu ý: Nếu bạn dùng Render, hãy nhớ cập nhật biến môi trường WEBAPP_URL trong Dashboard để cài đặt không bị mất khi bot restart.</i>`);
-        } catch (err) {
-            console.error('Failed to set WebApp:', err);
-            ctx.reply('❌ Lỗi: ' + err.message);
-        }
     });
 
     // ═══════════════════════════════════════
@@ -729,70 +453,128 @@ module.exports = (bot) => {
     });
 
     // /users - List users
-    bot.command('users', adminOnly, async (ctx) => {
+    bot.command('users', adminOnly, (ctx) => {
         const db = require('../database');
-        const users = db.prepare('SELECT * FROM users ORDER BY created_at DESC').all();
+        const users = db.prepare('SELECT * FROM users ORDER BY created_at DESC LIMIT 20').all();
 
-        if (users.length === 0) return ctx.reply('❌ Chưa có người dùng nào.');
+        let text = `👥 <b>USERS GẦN ĐÂY (${users.length})</b>\n\n`;
+        users.forEach((u) => {
+            text += `🆔 <code>${u.telegram_id}</code> | ${u.full_name}`;
+            if (u.username) text += ` (@${u.username})`;
+            text += `\n  💰 ${formatPrice(u.balance)} | 📅 ${u.created_at}\n\n`;
+        });
 
-        let header = `👥 <b>DANH SÁCH TẤT CẢ NGƯỜI DÙNG (${users.length})</b>\n\n`;
-        let text = header;
-        
-        for (let i = 0; i < users.length; i++) {
-            const u = users[i];
-            let userStr = `🆔 <code>${u.telegram_id}</code> | ${u.full_name}`;
-            if (u.username) userStr += ` (@${u.username})`;
-            userStr += `\n  💰 ${formatPrice(u.balance)} | 📅 ${u.created_at}\n\n`;
+        ctx.replyWithHTML(text);
+    });
 
-            if ((text + userStr).length > 4000) {
-                await ctx.replyWithHTML(text);
-                text = userStr; // Start new message without header
-            } else {
-                text += userStr;
-            }
+    // /addmoney [ID] [amount] - Cộng tiền cho user
+    bot.command('addmoney', adminOnly, async (ctx) => {
+        const argsText = ctx.message.text.replace('/addmoney', '').trim();
+        const parts = argsText.split(' ').map((s) => s.trim()).filter(Boolean);
+
+        if (parts.length < 2) {
+            return ctx.replyWithHTML(
+                `❌ <b>Sai cú pháp!</b>\n` +
+                `Cách dùng: <code>/addmoney [ID_USER] [SỐ_TIỀN]</code>\n\n` +
+                `Ví dụ: <code>/addmoney 123456789 50000</code>`
+            );
         }
-        
-        if (text.length > 0) {
-            await ctx.replyWithHTML(text);
+
+        const userId = parseInt(parts[0]);
+        const amount = parseInt(parts[1]);
+
+        if (isNaN(userId) || isNaN(amount) || amount <= 0) {
+            return ctx.reply('❌ ID user và số tiền phải là số hợp lệ (số tiền > 0).');
+        }
+
+        const user = userService.get(userId);
+        if (!user) {
+            return ctx.reply('❌ Không tìm thấy user với ID này trong hệ thống.');
+        }
+
+        // Cộng số dư
+        userService.addBalance(userId, amount);
+        const updatedUser = userService.get(userId);
+
+        // Thông báo cho admin
+        ctx.replyWithHTML(
+            `✅ <b>Cộng tiền thành công!</b>\n\n` +
+            `👤 User: <code>${updatedUser.telegram_id}</code> | ${updatedUser.full_name}\n` +
+            `💰 Đã cộng: <b>+${formatPrice(amount)}</b>\n` +
+            `💎 Số dư mới: <b>${formatPrice(updatedUser.balance)}</b>`
+        );
+
+        // Gửi tin nhắn thông báo cho user
+        try {
+            await ctx.telegram.sendMessage(
+                userId,
+                `🎉 <b>NẠP TIỀN THÀNH CÔNG</b>\n\n` +
+                `💰 Bạn vừa được quản trị viên cộng thêm <b>${formatPrice(amount)}</b> vào tài khoản.\n` +
+                `💎 Số dư hiện tại: <b>${formatPrice(updatedUser.balance)}</b>\n\n` +
+                `Cảm ơn bạn đã sử dụng dịch vụ!`,
+                { parse_mode: 'HTML' }
+            );
+        } catch (e) {
+            ctx.reply('⚠️ Không thể gửi thông báo cho user (có thể user đã chặn bot).');
         }
     });
 
-    // /send [ID/@username] [Nội dung] - Gửi thông báo tới 1 user
-    bot.command('send', adminOnly, async (ctx) => {
-        try {
-            const text = ctx.message.text.trim();
-            const parts = text.split(/\s+/); // Handle multiple spaces/tabs
-            
-            if (parts.length < 3) {
-                return ctx.replyWithHTML(
-                    `⚠️ <b>CÁCH DÙNG /SEND</b>\n\n` +
-                    `<code>/send [ID hoặc @username] [Nội dung]</code>\n\n` +
-                    `Ví dụ:\n` +
-                    `<code>/send 12345678 Chào bạn!</code>\n` +
-                    `<code>/send @username Thông báo quan trọng...</code>`
-                );
-            }
+    // /trutien [ID] [amount] - Trừ tiền của user
+    bot.command('trutien', adminOnly, async (ctx) => {
+        const argsText = ctx.message.text.replace('/trutien', '').trim();
+        const parts = argsText.split(' ').map((s) => s.trim()).filter(Boolean);
 
-            const query = parts[1];
-            const content = parts.slice(2).join(' ');
-            let user = null;
-
-            if (query.startsWith('@')) {
-                user = userService.getByUsername(query);
-            } else if (!isNaN(query)) {
-                user = userService.get(parseInt(query));
-            }
-
-            if (!user) {
-                return ctx.reply('❌ Không tìm thấy người dùng này trong cơ sở dữ liệu.');
-            }
-
-            await bot.telegram.sendMessage(user.telegram_id, `📢 <b>THÔNG BÁO TỪ ADMIN</b>\n\n${content}`, { parse_mode: 'HTML' });
-            return ctx.replyWithHTML(`✅ <b>ĐÃ GỬI XONG!</b>\n\n├ 👤 Tới: ${user.full_name} (@${user.username || 'N/A'})\n└ 🆔 ID: <code>${user.telegram_id}</code>`);
-        } catch (err) {
-            console.error('Error in /send command:', err);
-            return ctx.reply(`❌ Lỗi: ${err.message}`);
+        if (parts.length < 2) {
+            return ctx.replyWithHTML(
+                `❌ <b>Sai cú pháp!</b>\n` +
+                `Cách dùng: <code>/trutien [ID_USER] [SỐ_TIỀN]</code>`
+            );
         }
+
+        const userId = parseInt(parts[0]);
+        const amount = parseInt(parts[1]);
+
+        if (isNaN(userId) || isNaN(amount) || amount <= 0) {
+            return ctx.reply('❌ ID user và số tiền phải là số hợp lệ (số tiền > 0).');
+        }
+
+        const user = userService.get(userId);
+        if (!user) {
+            return ctx.reply('❌ Không tìm thấy user với ID này trong hệ thống.');
+        }
+
+        // Trừ số dư
+        const success = userService.deductBalance(userId, amount);
+        if (!success) {
+            return ctx.reply('❌ Lỗi: User không đủ số dư để trừ.');
+        }
+
+        const updatedUser = userService.get(userId);
+
+        // Thông báo cho admin
+        ctx.replyWithHTML(
+            `✅ <b>Trừ tiền thành công!</b>\n\n` +
+            `👤 User: <code>${updatedUser.telegram_id}</code> | ${updatedUser.full_name}\n` +
+            `💰 Đã trừ: <b>-${formatPrice(amount)}</b>\n` +
+            `💎 Số dư mới: <b>${formatPrice(updatedUser.balance)}</b>`
+        );
+    });
+
+    // /broadcast - Send message to all users
+    bot.command('broadcast', adminOnly, (ctx) => {
+        const msg = ctx.message.text.replace('/broadcast', '').trim();
+
+        if (!msg) {
+            adminState[ctx.from.id] = { action: 'broadcast' };
+            return ctx.replyWithHTML(
+                `📢 <b>GỬI THÔNG BÁO</b>\n\n` +
+                `Gửi nội dung thông báo ngay bây giờ.\n` +
+                `Hỗ trợ HTML formatting.\n\n` +
+                `Gõ /cancel để hủy.`
+            );
+        }
+
+        sendBroadcast(ctx, bot, msg);
     });
 
     // /cancel - Cancel current admin action
@@ -804,102 +586,48 @@ module.exports = (bot) => {
     });
 
     // ═══════════════════════════════════════
-    // MULTI-STEP ADMIN FLOWS
+    // TEXT HANDLER - for multi-step admin flows
     // ═══════════════════════════════════════
-    bot.on(['text', 'document', 'photo'], async (ctx, next) => {
+    bot.on('text', async (ctx, next) => {
         if (!isAdmin(ctx)) return next();
 
         const state = adminState[ctx.from.id];
         if (!state) return next();
 
-        // Handle addstock input
+        // Handle addstock text input
         if (state.action === 'addstock') {
-            const product = productService.getById(state.productId);
-            let itemsToAdd = [];
-
-            if (product && product.is_file) {
-                let fileId = null;
-                if (ctx.message.document) {
-                    fileId = ctx.message.document.file_id;
-                } else if (ctx.message.photo) {
-                    fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
-                } else if (ctx.message.text) {
-                    if (ctx.message.text.startsWith('/')) return next();
-                    return ctx.reply('⚠️ Sản phẩm này yêu cầu FILE hoặc ẢNH. Gửi file để thêm vào kho hoặc gõ /cancel để kết thúc.');
-                }
-                
-                if (fileId) {
-                    const caption = ctx.message.caption || '';
-                    const stockData = caption ? `${fileId}|${caption}` : fileId;
-                    itemsToAdd = [stockData];
-                }
-            } else {
-                // Text mode
-                if (!ctx.message.text) return ctx.reply('⚠️ Sản phẩm này yêu cầu văn bản/KEY. Hãy gửi nội dung text.');
-                if (ctx.message.text.startsWith('/')) return next();
-                
-                itemsToAdd = ctx.message.text.split('\n').filter((l) => l.trim());
-            }
-
-            if (itemsToAdd.length > 0) {
-                // Change action to ask for quantity
-                adminState[ctx.from.id] = { 
-                    action: 'addstock_qty', 
-                    productId: state.productId, 
-                    itemsTemplate: itemsToAdd 
-                };
-                
-                ctx.replyWithHTML(
-                    `📥 <b>ĐÃ NHẬN DỮ LIỆU (${itemsToAdd.length} mục)</b>\n\n` +
-                    `Bạn muốn nhân bản số lượng này lên bao nhiêu lần?\n` +
-                    `<i>(Ví dụ: Gửi 1 key và nhập 100 -> sẽ có 100 key trong kho)</i>`
-                );
-            }
-            return;
-        }
-
-        // Handle addstock_qty input
-        if (state.action === 'addstock_qty' && ctx.message.text) {
-            const qty = parseInt(ctx.message.text);
-            if (isNaN(qty) || qty <= 0 || qty > 1000) {
-                return ctx.reply('⚠️ Vui lòng nhập một số lượng hợp lệ (từ 1 đến 1000).');
-            }
-
-            const productId = state.productId;
-            const template = state.itemsTemplate;
             delete adminState[ctx.from.id];
 
-            // Add the template QTY times
-            for (let i = 0; i < qty; i++) {
-                productService.addStock(productId, template);
-            }
+            const lines = ctx.message.text.split('\n').filter((l) => l.trim());
+            if (lines.length === 0) return ctx.reply('❌ Không có dữ liệu.');
 
-            const product = productService.getById(productId);
+            productService.addStock(state.productId, lines);
+            const product = productService.getById(state.productId);
+
             ctx.replyWithHTML(
-                `✅ <b>THÀNH CÔNG!</b>\n\n` +
-                `├ Đã thêm: <b>${template.length * qty}</b> mục vào kho\n` +
+                `✅ <b>Đã thêm ${lines.length} KEY!</b>\n\n` +
                 `├ Sản phẩm: ${product.name}\n` +
-                `└ 📦 Tồn kho hiện tại: <b>${product.stock_count}</b>`
+                `└ 📦 Tồn kho: <b>${product.stock_count}</b>`
             );
             return;
         }
 
         // Handle broadcast text input
-        if (state.action === 'broadcast' && ctx.message.text) {
+        if (state.action === 'broadcast') {
             delete adminState[ctx.from.id];
             sendBroadcast(ctx, bot, ctx.message.text);
             return;
         }
 
         // Handle manual delivery: admin provides account info
-        if (state.action === 'deliver_order' && ctx.message.text) {
+        if (state.action === 'deliver_order') {
             delete adminState[ctx.from.id];
 
             const accountData = ctx.message.text.trim();
             const accounts = accountData.split('\n').filter((l) => l.trim());
 
-            // Mark order as delivered and save keys
-            orderService.manualDeliver(state.orderId, accounts);
+            // Mark order as delivered
+            orderService.manualDeliver(state.orderId);
 
             // Decrease sheet_stock in DB
             const db = require('../database');
@@ -915,6 +643,10 @@ module.exports = (bot) => {
                 customerMsg += `${i + 1})\n<code>${acc}</code>\n`;
             });
 
+            customerMsg += `Liên hệ <b>ADMIN</b> ở phía dưới để lấy <b>KEY</b> nha các tình yêu\n\n` +
+            `💬 Sản phẩm này cần liên hệ trực tiếp để lấy.\n` +
+            `Bấm nút bên dưới để xem thông tin liên hệ.`;
+
             // Send to customer
             try {
                 await bot.telegram.sendMessage(state.userId, customerMsg, { parse_mode: 'HTML' });
@@ -929,30 +661,6 @@ module.exports = (bot) => {
             return;
         }
 
-        // Handle user balance management
-        if (state.action === 'user_add_bal' || state.action === 'user_sub_bal') {
-            const amount = parseInt(ctx.message.text);
-            if (isNaN(amount) || amount <= 0) return ctx.reply('❌ Vui lòng nhập số tiền hợp lệ.');
-            
-            delete adminState[ctx.from.id];
-            const targetId = state.targetId;
-            
-            if (state.action === 'user_add_bal') {
-                userService.addBalance(targetId, amount);
-                ctx.reply(`✅ Đã CỘNG ${formatPrice(amount)} cho user ${targetId}`);
-                bot.telegram.sendMessage(targetId, `💰 Bạn vừa được Admin cộng <b>${formatPrice(amount)}</b> vào số dư tài khoản.`, { parse_mode: 'HTML' }).catch(() => {});
-            } else {
-                const success = userService.deductBalance(targetId, amount);
-                if (success) {
-                    ctx.reply(`✅ Đã TRỪ ${formatPrice(amount)} của user ${targetId}`);
-                    bot.telegram.sendMessage(targetId, `💸 Admin đã trừ <b>${formatPrice(amount)}</b> từ số dư tài khoản của bạn.`, { parse_mode: 'HTML' }).catch(() => {});
-                } else {
-                    ctx.reply('❌ User không đủ số dư để trừ.');
-                }
-            }
-            return;
-        }
-
         return next();
     });
 
@@ -963,7 +671,7 @@ module.exports = (bot) => {
     function showProductList(ctx) {
         const db = require('../database');
         const products = db.prepare(`
-      SELECT p.id as product_id, p.name, p.price, p.emoji, p.promotion, p.contact_only, p.is_active, p.category_id, p.is_file,
+      SELECT p.id as product_id, p.name, p.price, p.emoji, p.promotion, p.contact_only, p.is_active, p.category_id,
         c.name as cat_name, c.emoji as cat_emoji,
         (SELECT COUNT(*) FROM stock s WHERE s.product_id = p.id AND s.is_sold = 0) as stock_count
       FROM products p
@@ -983,8 +691,7 @@ module.exports = (bot) => {
             }
 
             const status = p.is_active ? '🟢' : '🔴';
-            const fileTag = p.is_file ? ' <b>[FILE]</b>' : '';
-            text += `${status} <b>ID:${p.product_id}</b> | ${p.name}${fileTag}\n`;
+            text += `${status} <b>ID:${p.product_id}</b> | ${p.name}\n`;
             text += `     💰 ${formatPrice(p.price)} | 📦 Kho: ${p.stock_count}`;
             if (p.contact_only) text += ` | 💬 Liên hệ`;
             if (p.promotion) text += ` | ${p.promotion}`;
@@ -994,8 +701,7 @@ module.exports = (bot) => {
         text += `\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
         text += `💡 Dùng ID ở trên cho các lệnh:\n`;
         text += `/addstock [ID] | /editprice [ID] [giá]\n`;
-        text += `/editname [ID] [tên] | /viewstock [ID]\n`;
-        text += `/togglefile [ID] — Bật/tắt chế độ gửi File`;
+        text += `/editname [ID] [tên] | /viewstock [ID]`;
 
         ctx.replyWithHTML(text);
     }
@@ -1022,22 +728,6 @@ module.exports = (bot) => {
         const stats = orderService.getStats();
         const db = require('../database');
         const todayOrders = db.prepare("SELECT COUNT(*) as c, COALESCE(SUM(total_price),0) as s FROM orders WHERE status='delivered' AND date(delivered_at)=date('now')").get();
-        
-        const todayBuyers = db.prepare(`
-            SELECT u.full_name, u.username, GROUP_CONCAT(p.name || ' (x' || o.quantity || ')', ', ') as products
-            FROM orders o 
-            JOIN users u ON o.user_id = u.telegram_id 
-            JOIN products p ON o.product_id = p.id
-            WHERE o.status = 'delivered' AND date(delivered_at) = date('now')
-            GROUP BY u.telegram_id
-        `).all();
-
-        const buyersText = todayBuyers.length > 0 
-            ? todayBuyers.map(b => {
-                const username = b.username ? ` (@${b.username})` : '';
-                return `${b.full_name}${username} (${b.products})`;
-            }).join(', ')
-            : '(Chưa có khách)';
 
         ctx.replyWithHTML(
             `📊 <b>THỐNG KÊ CHI TIẾT</b>\n\n` +
@@ -1049,8 +739,7 @@ module.exports = (bot) => {
             `└ 🏪 Tồn kho: ${stats.totalStock}\n\n` +
             `<b>Hôm nay:</b>\n` +
             `├ 📦 Đơn: ${todayOrders.c}\n` +
-            `├ 💰 Doanh thu: ${formatPrice(todayOrders.s)}\n` +
-            `└ 👥 Khách: <i>${buyersText}</i>`
+            `└ 💰 Doanh thu: ${formatPrice(todayOrders.s)}`
         );
     }
 
@@ -1085,6 +774,61 @@ module.exports = (bot) => {
 
         ctx.replyWithHTML(`📢 <b>Đã gửi xong!</b>\n├ ✅ Thành công: ${sent}\n└ ❌ Thất bại: ${failed}`);
     }
+
+    // ═══════════════════════════════════════
+    // VOUCHERS
+    // ═══════════════════════════════════════
+    bot.command('addvoucher', adminOnly, (ctx) => {
+        const args = ctx.message.text.split(' ').slice(1);
+        if (args.length < 2) {
+            return ctx.replyWithHTML(`❌ <b>Sai cú pháp!</b>\nCách dùng: <code>/addvoucher [MÃ] [SỐ_TIỀN] [SỐ_LƯỢT_DÙNG]</code>\n\nVí dụ: <code>/addvoucher FREE10K 10000 50</code>\n(Tạo mã FREE10K trị giá 10k, dùng được 50 lần)`);
+        }
+
+        const code = args[0].toUpperCase();
+        const amount = parseInt(args[1]);
+        const maxUses = args[2] ? parseInt(args[2]) : 1;
+
+        if (isNaN(amount) || amount <= 0 || isNaN(maxUses) || maxUses <= 0) {
+            return ctx.reply('❌ Số tiền và số lượt dùng phải là số nguyên dương.');
+        }
+
+        const result = voucherService.createVoucher(code, amount, maxUses);
+        if (result.success) {
+            ctx.replyWithHTML(`✅ <b>Tạo mã thành công!</b>\n\n🎁 Mã: <code>${code}</code>\n💰 Giá trị: ${formatPrice(amount)}\n🔁 Số lượt: ${maxUses}`);
+        } else {
+            ctx.reply(`❌ Lỗi: ${result.error}`);
+        }
+    });
+
+    bot.command('vouchers', adminOnly, (ctx) => {
+        const vouchers = voucherService.getVouchers();
+        if (vouchers.length === 0) {
+            return ctx.reply('📂 Không có mã voucher nào.');
+        }
+
+        let msg = `🎁 <b>DANH SÁCH VOUCHER</b>\n\n`;
+        vouchers.forEach((v) => {
+            const status = v.used_count >= v.max_uses ? '❌ Đã hết' : '✅ Đang chạy';
+            msg += `🎟 <code>${v.code}</code>\n`;
+            msg += `├ 💰 Giá trị: ${formatPrice(v.amount)}\n`;
+            msg += `├ 🔁 Lượt dùng: ${v.used_count}/${v.max_uses}\n`;
+            msg += `└ 📊 Trạng thái: ${status}\n\n`;
+        });
+        msg += `🗑 Xóa mã: <code>/deletevoucher [MÃ]</code>`;
+        ctx.replyWithHTML(msg);
+    });
+
+    bot.command('deletevoucher', adminOnly, (ctx) => {
+        const code = ctx.message.text.split(' ')[1];
+        if (!code) return ctx.reply('❌ Nhập mã cần xóa. Ví dụ: /deletevoucher FREE10K');
+
+        const success = voucherService.deleteVoucher(code.toUpperCase());
+        if (success) {
+            ctx.reply(`✅ Đã xóa mã ${code.toUpperCase()}`);
+        } else {
+            ctx.reply(`❌ Không tìm thấy mã ${code.toUpperCase()}`);
+        }
+    });
 };
 
 // Export setAdminState so other handlers can set admin state

@@ -64,15 +64,10 @@ function orderConfirmKeyboard(orderId) {
 function postDeliveryKeyboard() {
     return Markup.inlineKeyboard([
         [
+            // Markup.button.callback('📊 Data chính', 'data_main'),
             Markup.button.callback('🔄 Mua lại', 'buy_again'),
         ],
-        [
-            Markup.button.callback('📋 Quay lại danh sách', 'refresh_products')
-        ],
-        [
-            // Thay 'admin_username' bằng username thật của admin (không có dấu @)
-            Markup.button.url('👨‍💻 Liên hệ Admin', 'https://t.me/helyiosvietnam') 
-        ]
+        [Markup.button.callback('📋 Quay lại danh sách', 'refresh_products')],
     ]);
 }
 
@@ -88,9 +83,9 @@ function formatPrice(amount) {
  */
 function mainMenuKeyboard() {
     return Markup.keyboard([
-        ['📦 Mua Sản Phẩm', '👤 Tài Khoản'],
-        ['💰 Nạp Số Dư', '📜 Lịch Sử Đơn'],
-        ['🆘 Hỗ Trợ', '🎫 Nhập Mã Giảm Giá']
+        ['📦 Sản phẩm', '💰 Nạp tiền'],
+        ['🔍 Kiểm tra thanh toán', '👤 Tài khoản'],
+        ['🆘 Hỗ trợ'],
     ]).resize();
 }
 

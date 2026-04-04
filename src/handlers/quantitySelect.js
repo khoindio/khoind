@@ -24,12 +24,21 @@ module.exports = (bot) => {
             return ctx.answerCbQuery(`❌ Chỉ còn ${availableStock} sản phẩm`);
         }
 
+        const user = userService.findOrCreate(ctx.from);
+        const totalPrice = product.price * quantity;
+
+        if (user.balance >= totalPrice) {
+            ctx.answerCbQuery('⏳ Đang tạo đơn hàng bằng số dư...');
+            await createOrderAndPay(ctx, bot, product, quantity, 0);
+            return;
+        }
+
         const banks = paymentService.getBanks();
 
         if (banks.length > 1) {
             // Multiple banks → show bank selection
             ctx.answerCbQuery();
-            const totalPrice = product.price * quantity;
+            const amountToPay = totalPrice - (user.balance > 0 ? user.balance : 0);
             const bankButtons = banks.map((b, i) =>
                 [Markup.button.callback(`🏦 ${b.NAME}`, `bank_${productId}_${quantity}_${i}`)]
             );
@@ -38,8 +47,9 @@ module.exports = (bot) => {
             ctx.replyWithHTML(
                 `📦 <b>${product.name}</b>\n` +
                 `📊 Số lượng: ${quantity}\n` +
-                `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n\n` +
-                `🏦 Chọn ngân hàng thanh toán:`,
+                `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n` +
+                (user.balance > 0 ? `💎 Số dư hiện có: <b>${formatPrice(user.balance)}</b>\n💵 Cần thanh toán thêm: <b>${formatPrice(amountToPay)}</b>\n\n` : `\n`) +
+                `🏦 Chọn ngân hàng thanh toán phần còn lại:`,
                 Markup.inlineKeyboard(bankButtons)
             );
         } else {
@@ -74,100 +84,139 @@ module.exports = (bot) => {
     // ════════════════════════════════════
     async function createOrderAndPay(ctx, bot, product, quantity, bankIndex) {
         const user = userService.findOrCreate(ctx.from);
+
         const totalPrice = product.price * quantity;
+        
+        let balanceUsed = 0;
+        let amountToPay = totalPrice;
 
-        const discountBalance = Math.min(user.balance, totalPrice);
-        const needAmount = totalPrice - discountBalance;
+        if (user.balance > 0) {
+            balanceUsed = Math.min(user.balance, totalPrice);
+            amountToPay = totalPrice - balanceUsed;
+        }
 
-        const explicitCode = `DH${Date.now()}`;
-        const payment = paymentService.generatePayment(needAmount, bankIndex, user.telegram_id, explicitCode);
+        // Deduct balance immediately
+        if (balanceUsed > 0) {
+            userService.deductBalance(ctx.from.id, balanceUsed);
+        }
+
+        if (amountToPay === 0) {
+            // Full payment with balance
+            const order = orderService.create(
+                ctx.from.id,
+                product.id,
+                quantity,
+                totalPrice,
+                `BAL_${Date.now()}`,
+                balanceUsed
+            );
+            
+            orderService.markPaid(order.id);
+            
+            await ctx.replyWithHTML(
+                `✅ <b>Thanh toán thành công bằng Số dư!</b>\n\n` +
+                `📦 Sản phẩm: ${product.name}\n` +
+                `📊 Số lượng: ${quantity}\n` +
+                `💰 Đã trừ số dư: <b>${formatPrice(balanceUsed)}</b>\n\n` +
+                `⏳ Đang tự động giao hàng...`
+            );
+
+            // Attempt auto delivery
+            const realStock = productService.getAvailableStock(order.product_id, order.quantity);
+            if (realStock.length >= order.quantity) {
+                const { deliverOrder } = require('./paymentConfirm');
+                await deliverOrder(bot, order.id);
+            } else {
+                // Notify admin for manual delivery
+                const adminMsg = 
+                    `🔔 <b>ĐƠN HÀNG MỚI #${order.id} (SỐ DƯ)</b>\n\n` +
+                    `👤 Khách: <code>${ctx.from.id}</code>\n` +
+                    `📦 Sản phẩm: <b>${product.name}</b>\n` +
+                    `📊 Số lượng: ${quantity}\n` +
+                    `💰 Thanh toán: <b>FULL SỐ DƯ</b>\n\n` +
+                    `⚠️ Hết kho! Vui lòng cung cấp KEY thủ công.`;
+                
+                try {
+                    await bot.telegram.sendMessage(config.ADMIN_ID, adminMsg, {
+                        parse_mode: 'HTML',
+                        ...Markup.inlineKeyboard([
+                            [
+                                Markup.button.callback(`✅ Xác nhận #${order.id}`, `admin_confirm_${order.id}`),
+                                Markup.button.callback(`❌ Hủy #${order.id}`, `admin_cancel_${order.id}`)
+                            ]
+                        ])
+                    });
+                } catch(e) {}
+            }
+            return;
+        }
+
+        const payment = paymentService.generatePayment(amountToPay, bankIndex);
 
         const order = orderService.create(
             ctx.from.id,
             product.id,
             quantity,
             totalPrice,
-            needAmount > 0 ? payment.paymentCode : `BAL_${Date.now()}`,
-            discountBalance
+            payment.paymentCode,
+            balanceUsed
         );
 
-        if (needAmount === 0) {
-            // Paid fully by balance
-            ctx.reply('⏳ Đang xử lý thanh toán bằng số dư...');
-            const { deliverOrder } = require('./paymentConfirm');
-            const result = await deliverOrder(bot, order.id);
+        // 1. Send QR code to customer
+        const caption =
+            `⏳ <b>Đang chờ thanh toán...</b>\n\n` +
+            `Quét mã QR phía trên để chuyển khoản.\n\n` +
+            `💰 <b>THANH TOÁN ĐƠN HÀNG</b>\n\n` +
+            `📦 Sản phẩm: ${product.name}\n` +
+            `📊 Số lượng: ${quantity}\n` +
+            `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n` +
+            (balanceUsed > 0 ? `💎 Đã trừ số dư: <b>-${formatPrice(balanceUsed)}</b>\n` : '') +
+            `━━━━━━━━━━━━━━━━━\n\n` +
+            `🏦 Quét mã QR để chuyển khoản\n` +
+            `├ Số tiền: <b>${formatPrice(amountToPay)}</b>\n` +
+            `└ Nội dung CK: <code>${payment.paymentCode}</code>\n\n` +
+            `⏰ QR hiệu lực trong <b>15 phút</b>\n` +
+            `🚫 <b>KHÔNG</b> thay đổi nội dung chuyển khoản\n` +
+            `✅ Sau khi CK thành công, hàng sẽ được\ngiao <b>tự động</b> trong vòng dưới 60 giây`;
 
-            if (!result.success) {
-                ctx.reply(`⚠️ Đã ghi nhận thanh toán bằng số dư nhưng có lỗi: ${result.error}. Đơn hàng đã được chuyển cho admin xử lý thủ công.`);
-                
-                const userName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ');
-                const adminMsg = `🔔 <b>ĐƠN HÀNG ĐÃ THANH TOÁN (Lỗi giao tự động) #${order.id}</b>\nKhách: ${userName} (<code>${ctx.from.id}</code>)\nSản phẩm: ${product.name}\nSL: ${quantity}\nLỗi: ${result.error}`;
-                
-                for (const adminId of config.ADMIN_IDS) {
-                    await bot.telegram.sendMessage(adminId, adminMsg, {
-                        parse_mode: 'HTML',
-                        ...Markup.inlineKeyboard([
-                            [Markup.button.callback(`✅ Xác nhận & giao hàng thủ công #${order.id}`, `admin_confirm_${order.id}`)],
-                            [Markup.button.callback(`❌ Hủy #${order.id}`, `admin_cancel_${order.id}`)],
-                        ])
-                    }).catch(e => console.error(`Failed to notify admin ${adminId}:`, e.message));
-                }
-            }
-        } else {
-            // Need to pay remaining amount via bank transfer
-            // 1. Send QR code to customer
-            const caption =
-                `⏳ <b>Đang chờ thanh toán phần còn thiếu...</b>\n\n` +
-                `💰 <b>THANH TOÁN ĐƠN HÀNG #${order.id}</b>\n\n` +
-                `📦 Sản phẩm: ${product.name}\n` +
-                `📊 Số lượng: ${quantity}\n` +
-                `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n` +
-                (discountBalance > 0 ? `💳 Sử dụng số dư: <b>-${formatPrice(discountBalance)}</b>\n` : '') +
-                `━━━━━━━━━━━━━━━━━\n\n` +
-                `⚠️ Bạn cần chuyển khoản thêm: <b>${formatPrice(needAmount)}</b>\n\n` +
-                `🏦 Quét mã QR phía trên để chuyển khoản\n` +
-                `├ Số tiền: <b>${formatPrice(needAmount)}</b>\n` +
-                `└ Nội dung CK: <code>${payment.paymentCode}</code>\n\n` +
-                `⏰ QR hiệu lực trong <b>15 phút</b>\n` +
-                `🚫 <b>KHÔNG</b> thay đổi nội dung chuyển khoản\n` +
-                `✅ Sau khi CK thành công, hàng sẽ được\ngiao tự động trong vòng dưới 60 giây`;
+        await ctx.replyWithPhoto(payment.qrUrl, {
+            caption,
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('❌ Hủy thanh toán', `cancel_order_${order.id}`)],
+            ]),
+        });
 
-            await ctx.replyWithPhoto(payment.qrUrl, {
-                caption,
+        // 2. Notify Admin
+        const userName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ');
+        const adminMsg =
+            `🔔 <b>ĐƠN HÀNG MỚI #${order.id}</b>\n\n` +
+            `👤 Khách: <b>${userName}</b> (<code>${ctx.from.id}</code>)\n` +
+            (ctx.from.username ? `📱 @${ctx.from.username}\n` : '') +
+            `\n` +
+            `📦 Sản phẩm: <b>${product.name}</b>\n` +
+            `📊 Số lượng: ${quantity}\n` +
+            `💰 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n` +
+            (balanceUsed > 0 ? `💎 Đã trừ số dư: <b>${formatPrice(balanceUsed)}</b>\n` : '') +
+            `💵 Cần CK: <b>${formatPrice(amountToPay)}</b>\n` +
+            `🏦 Bank: <b>${payment.bankName}</b>\n` +
+            `🔑 Mã CK: <code>${payment.paymentCode}</code>\n\n` +
+            `━━━━━━━━━━━━━━━━━\n` +
+            `✅ Xác nhận & giao hàng:\n` +
+            `<code>/confirm ${order.id}</code>`;
+
+        try {
+            await bot.telegram.sendMessage(config.ADMIN_ID, adminMsg, {
                 parse_mode: 'HTML',
                 ...Markup.inlineKeyboard([
-                    [Markup.button.callback('❌ Hủy thanh toán', `cancel_order_${order.id}`)],
+                    [
+                        Markup.button.callback(`✅ Xác nhận #${order.id}`, `admin_confirm_${order.id}`),
+                        Markup.button.callback(`❌ Hủy #${order.id}`, `admin_cancel_${order.id}`),
+                    ],
                 ]),
             });
-
-            // 2. Notify Admin
-            const userName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ');
-            const adminMsg =
-                `🔔 <b>ĐƠN HÀNG MỚI #${order.id}</b>\n\n` +
-                `👤 Khách: <b>${userName}</b> (<code>${ctx.from.id}</code>)\n` +
-                (ctx.from.username ? `📱 @${ctx.from.username}\n` : '') +
-                `\n` +
-                `📦 Sản phẩm: <b>${product.name}</b>\n` +
-                `📊 Số lượng: ${quantity}\n` +
-                `💰 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n` +
-                (discountBalance > 0 ? `💳 Đã trừ vào số dư nháp: ${formatPrice(discountBalance)}\n` : '') +
-                `🏦 Khách cần CK thêm: <b>${formatPrice(needAmount)}</b> (${payment.bankName})\n` +
-                `🔑 Mã CK: <code>${payment.paymentCode}</code>\n\n` +
-                `━━━━━━━━━━━━━━━━━\n` +
-                `✅ Khi nhận được tiền, xác nhận & giao hàng:\n` +
-                `<code>/confirm ${order.id}</code>`;
-
-            for (const adminId of config.ADMIN_IDS) {
-                await bot.telegram.sendMessage(adminId, adminMsg, {
-                    parse_mode: 'HTML',
-                    ...Markup.inlineKeyboard([
-                        [
-                            Markup.button.callback(`✅ Xác nhận #${order.id}`, `admin_confirm_${order.id}`),
-                            Markup.button.callback(`❌ Hủy #${order.id}`, `admin_cancel_${order.id}`),
-                        ],
-                    ]),
-                }).catch(err => console.error(`Failed to notify admin ${adminId}:`, err.message));
-            }
+        } catch (err) {
+            console.error('Failed to notify admin:', err.message);
         }
     }
 
@@ -175,7 +224,7 @@ module.exports = (bot) => {
     // Admin quick-action buttons on order notification
     // ════════════════════════════════════
     bot.action(/^admin_confirm_(\d+)$/, async (ctx) => {
-        if (!config.ADMIN_IDS.includes(ctx.from.id)) return ctx.answerCbQuery('⛔');
+        if (ctx.from.id !== config.ADMIN_ID) return ctx.answerCbQuery('⛔');
 
         const orderId = parseInt(ctx.match[1]);
         const order = orderService.getById(orderId);
@@ -202,7 +251,7 @@ module.exports = (bot) => {
             }
         } else {
             // ── MANUAL DELIVERY: No stock entries → ask admin to provide account info ──
-            ctx.answerCbQuery('📝 Cần cung cấp KEY...');
+            ctx.answerCbQuery('📝 Cần cung cấp <b>KEY</b>...');
             orderService.markPaid(orderId);
 
             // Store state for admin to reply with account info
@@ -224,7 +273,7 @@ module.exports = (bot) => {
                 `📝 <b>GIAO HÀNG THỦ CÔNG — Đơn #${orderId}</b>\n\n` +
                 `📦 SP: <b>${product.name}</b>\n` +
                 `📊 SL: ${order.quantity}\n\n` +
-                `👇 Gửi thông tin KEY ngay bây giờ:\n\n` +
+                `👇 Gửi thông tin <b>KEY</b> ngay bây giờ:\n\n` +
                 `<i>Ví dụ:</i>\n` +
                 `<code>KEY</code>\n\n` +
                 `Bot sẽ tự động chuyển cho khách.\n` +
@@ -234,7 +283,7 @@ module.exports = (bot) => {
     });
 
     bot.action(/^admin_cancel_(\d+)$/, (ctx) => {
-        if (!config.ADMIN_IDS.includes(ctx.from.id)) return ctx.answerCbQuery('⛔');
+        if (ctx.from.id !== config.ADMIN_ID) return ctx.answerCbQuery('⛔');
 
         const orderId = parseInt(ctx.match[1]);
         orderService.cancel(orderId);

@@ -24,8 +24,8 @@ const paymentService = {
     /**
      * Generate unique payment code
      */
-    generatePaymentCode(userId) {
-        return `NAP ${userId}`;
+    generatePaymentCode() {
+        return `NAP PAY-${generateId()}`;
     },
 
     /**
@@ -47,9 +47,9 @@ const paymentService = {
     /**
      * Generate full QR payment info
      */
-    generatePayment(amount, bankIndex = 0, userId, explicitCode = null) {
+    generatePayment(amount, bankIndex = 0) {
         const bank = this.getBank(bankIndex);
-        const paymentCode = explicitCode || this.generatePaymentCode(userId);
+        const paymentCode = this.generatePaymentCode();
         const qrUrl = this.generateQRUrl(amount, paymentCode, bank);
 
         return {

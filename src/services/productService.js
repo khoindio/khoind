@@ -83,13 +83,13 @@ const productService = {
     /**
      * Mark stock as sold
      */
-    markSold(stockIds, userId, orderId = null) {
+    markSold(stockIds, userId) {
         const update = db.prepare(
-            'UPDATE stock SET is_sold = 1, sold_to = ?, sold_at = CURRENT_TIMESTAMP, order_id = ? WHERE id = ?'
+            'UPDATE stock SET is_sold = 1, sold_to = ?, sold_at = CURRENT_TIMESTAMP WHERE id = ?'
         );
         const updateMany = db.transaction((ids) => {
             for (const id of ids) {
-                update.run(userId, orderId, id);
+                update.run(userId, id);
             }
         });
         updateMany(stockIds);

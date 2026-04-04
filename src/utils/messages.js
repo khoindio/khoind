@@ -6,14 +6,14 @@ const SHOP = config.SHOP_NAME;
 const messages = {
     welcome: (name) =>
         `👋 Chào mừng <b>${name}</b> đến với <b>${SHOP}</b>!\n\n` +
-        `🛒 Chuyên cung cấp <b>KEY HACK</b> giá rẻ\n\n` +
+        `🛒 Chuyên cung cấp <b>KEY Hack</b> giá rẻ\n\n` +
         `📋 <b>Danh sách lệnh:</b>\n` +
         `/start — 🔄 Bắt đầu / Khởi động lại\n` +
         `/menu — 👤 Thông tin tài khoản\n` +
         `/product — 📦 Danh sách sản phẩm\n` +
         `/nap — 💰 Nạp số dư\n` +
-        `/nhapma — 🎫 Nhập mã giảm giá\n` +
-        `/history — 📜 Lịch sử mua hàng\n` +
+        `/voucher — 🎁 Nhập mã quà tặng\n` +
+        `/checkpay — 🔍 Kiểm tra thanh toán\n` +
         `/support — 🆘 Hỗ trợ\n` +
         `/myid — 🆔 Lấy ID của bạn`,
 
@@ -37,7 +37,7 @@ const messages = {
         `📦 <b>${product.name}</b>\n\n` +
         `💰 Giá: ${formatPrice(product.price)}\n` +
         (product.promotion ? `📋 ${product.promotion}\n` : '') +
-        `Liên hệ ADMIN ở phía dưới để lấy KEY nha các tình yêu\n\n` +
+        `Liên hệ <b>ADMIN</b> ở phía dưới để lấy <b>KEY</b> nha các tình yêu\n\n` +
         `💬 Sản phẩm này cần liên hệ trực tiếp để lấy.\n` +
         `Bấm nút bên dưới để xem thông tin liên hệ.`,
 
@@ -57,17 +57,21 @@ const messages = {
         let msg =
             `✅ <b>ĐƠN HÀNG THÀNH CÔNG!</b>\n\n` +
             `📦 ${product.name} × ${quantity}\n\n` +
-            `🔑 <b>Thông tin KEY:</b>\n`;
+            `🔑 <b>Thông tin <b>KEY</b>:</b>\n`;
 
         accounts.forEach((acc, i) => {
             msg += `${i + 1})\n<code>${acc}</code>\n`;
         });
 
+        msg += `Liên hệ <b>ADMIN</b> ở phía dưới để lấy <b>KEY</b> nha các tình yêu\n\n` +
+        `💬 Sản phẩm này cần liên hệ trực tiếp để lấy.\n` +
+        `Bấm nút bên dưới để xem thông tin liên hệ.`;
+
         return msg;
     },
 
     orderSuccessNotify: (quantity) =>
-        `✅ Đã mua thành công ${quantity} KEY! Kiểm tra tin nhắn bên dưới.`,
+        `✅ Đã mua thành công ${quantity} <b>KEY</b>! Kiểm tra tin nhắn bên dưới.`,
 
     noStock:
         '❌ Rất tiếc, sản phẩm đã hết hàng. Vui lòng thử lại sau.',

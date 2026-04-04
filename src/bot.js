@@ -1,5 +1,6 @@
 const { Telegraf, session } = require('telegraf');
 const config = require('./config');
+const express = require('express');
 
 // Validate token
 if (!config.BOT_TOKEN || config.BOT_TOKEN === 'your_bot_token_here') {
@@ -8,18 +9,6 @@ if (!config.BOT_TOKEN || config.BOT_TOKEN === 'your_bot_token_here') {
 }
 
 const bot = new Telegraf(config.BOT_TOKEN);
-
-// Blocked users middleware
-const userService = require('./services/userService');
-bot.use(async (ctx, next) => {
-    if (ctx.from) {
-        const user = userService.get(ctx.from.id);
-        if (user && user.is_blocked) {
-            return ctx.reply('🚫 Tài khoản của bạn đã bị khóa khỏi hệ thống. Vui lòng liên hệ hỗ trợ nếu đây là nhầm lẫn.');
-        }
-    }
-    return next();
-});
 
 // Enable session for admin stock input
 bot.use(session());
@@ -39,22 +28,40 @@ require('./commands/start')(bot);
 require('./commands/menu')(bot);
 require('./commands/product')(bot);
 require('./commands/nap')(bot);
+require('./commands/checkpay')(bot);
 require('./commands/support')(bot);
 require('./commands/myid')(bot);
-require('./commands/history')(bot);
-require('./commands/broadcast')(bot);
-require('./commands/promo')(bot);
+require('./commands/voucher')(bot);
 
 // Register handlers
 require('./handlers/productSelect')(bot);
 require('./handlers/quantitySelect')(bot);
 require('./handlers/paymentConfirm')(bot);
 require('./handlers/adminActions')(bot);
-require('./handlers/supportChat')(bot);
-require('./handlers/mainMenu')(bot);
 
-// Khởi động Web Service (Webhook & API)
-require('./server')(bot);
+// Set bot commands for menu
+bot.telegram.setMyCommands([
+    { command: 'start', description: '🔄 Bắt đầu / Khởi động lại' },
+    { command: 'menu', description: '👤 Thông tin tài khoản' },
+    { command: 'product', description: '📦 Danh sách sản phẩm' },
+    { command: 'nap', description: '💰 Nạp số dư' },
+    { command: 'voucher', description: '🎁 Nhập mã quà tặng' },
+    { command: 'checkpay', description: '🔍 Kiểm tra thanh toán' },
+    { command: 'support', description: '🆘 Hỗ trợ' },
+    { command: 'myid', description: '🆔 Lấy ID của bạn' },
+]);
+
+// Add express server for Render health checks
+const app = express();
+const PORT = process.env.PORT || config.WEBHOOK_PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('Bot is running!');
+});
+
+app.listen(PORT, () => {
+    console.log(`🌐 Web server running on port ${PORT}`);
+});
 
 // Launch bot
 bot.launch()
@@ -63,42 +70,9 @@ bot.launch()
         console.log(`👤 Admin ID: ${config.ADMIN_ID}`);
         console.log(`🏦 Bank: ${config.BANK.NAME} - ${config.BANK.ACCOUNT}`);
 
-        // Set Web App Menu Button if configured
-        if (config.WEBAPP_URL) {
-            const menuButton = {
-                type: 'web_app',
-                text: 'Mở Shop',
-                web_app: { url: config.WEBAPP_URL }
-            };
-
-            // Global default
-            bot.telegram.callApi('setChatMenuButton', { menu_button: menuButton })
-                .then(() => console.log('📱 Đã thiết lập nút Mini App (Global): ' + config.WEBAPP_URL))
-                .catch((err) => console.error('❌ Lỗi thiết lập nút Mini App (Global):', err.message));
-
-            // Per admin (optional but ensures immediate update)
-            for (const adminId of config.ADMIN_IDS) {
-                if (adminId) {
-                    bot.telegram.setChatMenuButton(adminId, menuButton).catch(() => {});
-                }
-            }
-        }
-
         // Start Google Sheet auto-sync
         const { startAutoSync } = require('./services/sheetSync');
         startAutoSync();
-
-        // Set bot commands for menu
-        return bot.telegram.setMyCommands([
-            { command: 'start', description: '🔄 Bắt đầu / Khởi động lại' },
-            { command: 'menu', description: '👤 Thông tin tài khoản' },
-            { command: 'product', description: '📦 Danh sách sản phẩm' },
-            { command: 'nap', description: '💰 Nạp số dư' },
-            { command: 'nhapma', description: '🎫 Nhập mã giảm giá' },
-            { command: 'history', description: '📜 Lịch sử mua hàng' },
-            { command: 'support', description: '🆘 Hỗ trợ' },
-            { command: 'myid', description: '🆔 Lấy ID của bạn' },
-        ]);
     })
     .catch((err) => {
         console.error('❌ Không thể khởi động bot:', err.message);
