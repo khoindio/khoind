@@ -31,6 +31,8 @@ require('./commands/nap')(bot);
 require('./commands/checkpay')(bot);
 require('./commands/support')(bot);
 require('./commands/myid')(bot);
+require('./commands/voucherAdmin')(bot);
+require('./commands/voucher')(bot);
 
 // Register handlers
 require('./handlers/productSelect')(bot);

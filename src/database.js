@@ -70,11 +70,33 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(telegram_id),
     FOREIGN KEY (product_id) REFERENCES products(id)
   );
+
+  CREATE TABLE IF NOT EXISTS vouchers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    type TEXT NOT NULL,
+    value INTEGER NOT NULL,
+    max_usages INTEGER DEFAULT 1,
+    used_count INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME
+  );
+
+  CREATE TABLE IF NOT EXISTS voucher_usages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    voucher_id INTEGER NOT NULL,
+    telegram_id INTEGER NOT NULL,
+    used_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (voucher_id) REFERENCES vouchers(id),
+    FOREIGN KEY (telegram_id) REFERENCES users(telegram_id)
+  );
 `);
 
 // Safe migrations for existing databases
 try { db.exec('ALTER TABLE products ADD COLUMN contact_url TEXT'); } catch (e) { /* already exists */ }
 try { db.exec('ALTER TABLE products ADD COLUMN sheet_stock INTEGER DEFAULT 0'); } catch (e) { /* already exists */ }
+try { db.exec('ALTER TABLE vouchers ADD COLUMN expires_at DATETIME'); } catch (e) { /* already exists */ }
 
 // Seed data - only if categories table is empty
 const catCount = db.prepare('SELECT COUNT(*) as c FROM categories').get();
