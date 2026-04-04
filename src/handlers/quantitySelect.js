@@ -2,44 +2,12 @@ const productService = require('../services/productService');
 const orderService = require('../services/orderService');
 const paymentService = require('../services/paymentService');
 const userService = require('../services/userService');
-const voucherService = require('../services/voucherService');
 const messages = require('../utils/messages');
 const config = require('../config');
 const { Markup } = require('telegraf');
 const { formatPrice } = require('../utils/keyboard');
 
 module.exports = (bot) => {
-    // Helper to render checkout options
-    const renderCheckout = async (ctx, product, quantity, discount = 0, voucherCode = null) => {
-        const banks = paymentService.getBanks();
-        const totalPrice = Math.max(0, (product.price * quantity) - discount);
-
-        if (banks.length > 1) {
-            ctx.answerCbQuery().catch(()=>{});
-            const bankButtons = banks.map((b, i) =>
-                [Markup.button.callback(`🏦 ${b.NAME}`, `bank_${product.id}_${quantity}_${i}`)]
-            );
-            
-            if (!voucherCode) {
-                bankButtons.unshift([Markup.button.callback('🎟️ Nhập Mã Giảm Giá', `apply_voucher_${product.id}_${quantity}`)]);
-            }
-            bankButtons.push([Markup.button.callback('❌ Hủy', 'cancel_order')]);
-
-            let text = `📦 <b>${product.name}</b>\n` +
-                       `📊 Số lượng: ${quantity}\n`;
-            if (voucherCode) {
-                text += `🎟️ Voucher: <b>${voucherCode}</b> (-${formatPrice(discount)})\n`;
-            }
-            text += `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n\n` +
-                    `🏦 Chọn ngân hàng thanh toán:`;
-
-            return ctx.replyWithHTML(text, Markup.inlineKeyboard(bankButtons));
-        } else {
-            ctx.answerCbQuery('⏳ Đang tạo đơn hàng...').catch(()=>{});
-            await createOrderAndPay(ctx, bot, product, quantity, 0, discount, voucherCode);
-        }
-    };
-
     // Handle quantity selection: qty_{productId}_{quantity}
     bot.action(/^qty_(\d+)_(\d+)$/, async (ctx) => {
         const productId = parseInt(ctx.match[1]);
@@ -50,34 +18,35 @@ module.exports = (bot) => {
             return ctx.answerCbQuery('❌ Sản phẩm không tồn tại');
         }
 
+        // Check stock availability (display_stock includes sheet_stock fallback)
         const availableStock = product.display_stock || product.stock_count;
         if (availableStock < quantity) {
             return ctx.answerCbQuery(`❌ Chỉ còn ${availableStock} sản phẩm`);
         }
 
-        // Reset any previous discount session
-        if (ctx.session) {
-            ctx.session.discountVoucher = null;
-            ctx.session.awaitingDiscountVoucher = null;
+        const banks = paymentService.getBanks();
+
+        if (banks.length > 1) {
+            // Multiple banks → show bank selection
+            ctx.answerCbQuery();
+            const totalPrice = product.price * quantity;
+            const bankButtons = banks.map((b, i) =>
+                [Markup.button.callback(`🏦 ${b.NAME}`, `bank_${productId}_${quantity}_${i}`)]
+            );
+            bankButtons.push([Markup.button.callback('❌ Hủy', 'cancel_order')]);
+
+            ctx.replyWithHTML(
+                `📦 <b>${product.name}</b>\n` +
+                `📊 Số lượng: ${quantity}\n` +
+                `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n\n` +
+                `🏦 Chọn ngân hàng thanh toán:`,
+                Markup.inlineKeyboard(bankButtons)
+            );
+        } else {
+            // Single bank → create order directly
+            ctx.answerCbQuery('⏳ Đang tạo đơn hàng...');
+            await createOrderAndPay(ctx, bot, product, quantity, 0);
         }
-
-        await renderCheckout(ctx, product, quantity);
-    });
-
-    // Handle apply voucher button
-    bot.action(/^apply_voucher_(\d+)_(\d+)$/, (ctx) => {
-        const productId = parseInt(ctx.match[1]);
-        const quantity = parseInt(ctx.match[2]);
-        
-        if (!ctx.session) ctx.session = {};
-        ctx.session.awaitingDiscountVoucher = { productId, quantity };
-        
-        ctx.answerCbQuery('Nhập mã giảm giá...');
-        ctx.replyWithHTML(
-            `🎟️ <b>NHẬP MÁ GIẢM GIÁ</b>\n\n` +
-            `Vui lòng gõ mã giảm giá của bạn vào khung chat và gửi lên.\n` +
-            `Gõ /cancel để hủy bỏ.`
-        );
     });
 
     // Handle bank selection: bank_{productId}_{quantity}_{bankIndex}
@@ -96,65 +65,17 @@ module.exports = (bot) => {
             return ctx.answerCbQuery(`❌ Chỉ còn ${availableStock} sản phẩm`);
         }
 
-        let discount = 0;
-        let voucherCode = null;
-        
-        if (ctx.session && ctx.session.discountVoucher && ctx.session.discountVoucher.productId === productId) {
-            discount = ctx.session.discountVoucher.value;
-            voucherCode = ctx.session.discountVoucher.code;
-        }
-
         ctx.answerCbQuery('⏳ Đang tạo đơn hàng...');
-        await createOrderAndPay(ctx, bot, product, quantity, bankIndex, discount, voucherCode);
-    });
-
-    // Handle text input for voucher
-    bot.on('text', async (ctx, next) => {
-        if (ctx.session && ctx.session.awaitingDiscountVoucher) {
-            const state = ctx.session.awaitingDiscountVoucher;
-            ctx.session.awaitingDiscountVoucher = null; // clear state
-
-            const code = ctx.message.text.trim().toUpperCase();
-            if (code.startsWith('/')) return next(); // let commands handle it if it's a command
-
-            const check = voucherService.checkVoucher(code, ctx.from.id);
-            
-            const product = productService.getById(state.productId);
-            if (!product) return ctx.reply('❌ Sản phẩm không tồn tại.');
-
-            if (!check.valid) {
-                ctx.reply(check.error);
-                return renderCheckout(ctx, product, state.quantity);
-            }
-
-            const voucher = check.voucher;
-            // Cap discount to total price
-            const maxDiscount = product.price * state.quantity;
-            const appliedDiscount = Math.min(voucher.value, maxDiscount);
-
-            // Save to session
-            ctx.session.discountVoucher = {
-                code: voucher.code,
-                value: appliedDiscount,
-                productId: state.productId
-            };
-
-            ctx.replyWithHTML(`✅ Đã áp dụng mã giảm giá: <b>${formatPrice(appliedDiscount)}</b>`);
-            await renderCheckout(ctx, product, state.quantity, appliedDiscount, voucher.code);
-            return;
-        }
-        return next();
+        await createOrderAndPay(ctx, bot, product, quantity, bankIndex);
     });
 
     // ════════════════════════════════════
     // Shared: Create order + send QR + notify admin
     // ════════════════════════════════════
-    async function createOrderAndPay(ctx, bot, product, quantity, bankIndex, discount = 0, voucherCode = null) {
+    async function createOrderAndPay(ctx, bot, product, quantity, bankIndex) {
         userService.findOrCreate(ctx.from);
 
-        const basePrice = product.price * quantity;
-        const totalPrice = Math.max(0, basePrice - discount);
-        
+        const totalPrice = product.price * quantity;
         const payment = paymentService.generatePayment(totalPrice, bankIndex);
 
         const order = orderService.create(
@@ -165,71 +86,13 @@ module.exports = (bot) => {
             payment.paymentCode
         );
 
-        // Mark voucher as used if applicable
-        if (voucherCode && discount > 0) {
-            voucherService.useVoucher(voucherCode, ctx.from.id);
-            // Clear session
-            if (ctx.session) ctx.session.discountVoucher = null;
-        }
-
-        // Handle 100% discount (Free Order)
-        if (totalPrice === 0) {
-            ctx.replyWithHTML(
-                `🎉 <b>ĐƠN HÀNG MIỄN PHÍ!</b>\n\n` +
-                `📦 Sản phẩm: ${product.name}\n` +
-                `📊 Số lượng: ${quantity}\n` +
-                `🎟️ Voucher đã áp dụng: <b>${voucherCode}</b>\n\n` +
-                `⏳ Đang tiến hành giao hàng tự động...`
-            );
-
-            const { deliverOrder } = require('./paymentConfirm');
-            const result = await deliverOrder(bot, order.id);
-
-            if (result.success) {
-                // Done.
-                return;
-            } else {
-                // No real stock available -> notify admin
-                orderService.markPaid(order.id);
-                
-                // Store state for admin
-                const { setAdminState } = require('./adminActions');
-                setAdminState(config.ADMIN_ID, {
-                    action: 'deliver_order',
-                    orderId: order.id,
-                    userId: order.user_id,
-                    productName: product.name,
-                    quantity: order.quantity,
-                });
-                
-                // Notify admin
-                const adminMsg = 
-                    `🔔 <b>ĐƠN HÀNG MIỄN PHÍ (CẦN GIAO THỦ CÔNG) #${order.id}</b>\n` +
-                    `📦 Tên: <b>${product.name}</b>\n` +
-                    `📊 Số lượng: ${quantity}\n` +
-                    `📝 User ID: ${order.user_id}\n\n` +
-                    `Hãy vào chat để gửi KEY!`;
-                
-                bot.telegram.sendMessage(config.ADMIN_ID, adminMsg, { parse_mode: 'HTML' }).catch(()=>{});
-                
-                ctx.reply('⚠️ Đơn hàng miễn phí đang chờ Admin xử lý. Bot sẽ gửi hàng cho bạn sớm nhất!');
-                return;
-            }
-        }
-
         // 1. Send QR code to customer
-        let caption =
+        const caption =
             `⏳ <b>Đang chờ thanh toán ${formatPrice(totalPrice)}...</b>\n\n` +
             `Quét mã QR phía trên để chuyển khoản.\n\n` +
             `💰 <b>THANH TOÁN ĐƠN HÀNG</b>\n\n` +
             `📦 Sản phẩm: ${product.name}\n` +
-            `📊 Số lượng: ${quantity}\n`;
-            
-        if (voucherCode) {
-            caption += `🎟️ Voucher: <b>${voucherCode}</b> (-${formatPrice(discount)})\n`;
-        }
-            
-        caption += 
+            `📊 Số lượng: ${quantity}\n` +
             `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n\n` +
             `━━━━━━━━━━━━━━━━━\n\n` +
             `🏦 Quét mã QR để chuyển khoản\n` +
