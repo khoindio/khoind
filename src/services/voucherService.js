@@ -1,105 +1,85 @@
 const db = require('../database');
+const userService = require('./userService');
 
-class VoucherService {
-    // Add new voucher
-    addVoucher(code, value, maxUsages = 1, expiresInDays = null) {
+const voucherService = {
+    /**
+     * Create a new voucher
+     * @param {string} code 
+     * @param {number} amount 
+     * @param {number} maxUses 
+     */
+    createVoucher(code, amount, maxUses = 1) {
         try {
-            let expiresAt = null;
-            if (expiresInDays) {
-                const date = new Date();
-                date.setDate(date.getDate() + expiresInDays);
-                expiresAt = date.toISOString().slice(0, 19).replace('T', ' '); // format: YYYY-MM-DD HH:MM:SS
-            }
-
-            const stmt = db.prepare(`
-                INSERT INTO vouchers (code, type, value, max_usages, expires_at)
-                VALUES (?, ?, ?, ?, ?)
-            `);
-            const info = stmt.run(code, 'general', value, maxUsages, expiresAt);
-            return { success: true, id: info.lastInsertRowid };
-        } catch (err) {
-            if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+            db.prepare('INSERT INTO vouchers (code, amount, max_uses) VALUES (?, ?, ?)')
+              .run(code, amount, maxUses);
+            return { success: true };
+        } catch (error) {
+            if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
                 return { success: false, error: 'Mã voucher đã tồn tại.' };
             }
-            return { success: false, error: err.message };
+            return { success: false, error: error.message };
         }
-    }
+    },
 
-    // Get voucher by code
-    getVoucher(code) {
-        return db.prepare('SELECT * FROM vouchers WHERE code = ? AND is_active = 1').get(code);
-    }
-
-    // Get all vouchers
-    getAllVouchers() {
+    /**
+     * Get all vouchers
+     */
+    getVouchers() {
         return db.prepare('SELECT * FROM vouchers ORDER BY created_at DESC').all();
-    }
+    },
 
-    // Delete voucher
+    /**
+     * Delete a voucher by code
+     * @param {string} code 
+     */
     deleteVoucher(code) {
-        const info = db.prepare('DELETE FROM vouchers WHERE code = ?').run(code);
-        return info.changes > 0;
-    }
+        const result = db.prepare('DELETE FROM vouchers WHERE code = ?').run(code);
+        return result.changes > 0;
+    },
 
-    // Check if voucher is valid for a specific user
-    checkVoucher(code, telegramId) {
-        const voucher = this.getVoucher(code);
+    /**
+     * Redeem a voucher for a user
+     * @param {number} userId - Telegram User ID
+     * @param {string} code - Voucher code
+     */
+    redeemVoucher(userId, code) {
+        // Ensure user exists
+        userService.findOrCreate({ id: userId });
+
+        const voucher = db.prepare('SELECT * FROM vouchers WHERE code = ?').get(code);
 
         if (!voucher) {
-            return { valid: false, error: '❌ Mã voucher không hợp lệ hoặc đã bị vô hiệu hóa.' };
+            return { success: false, error: 'Mã voucher không hợp lệ hoặc không tồn tại.' };
         }
 
-        if (voucher.expires_at) {
-            const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-            if (now > voucher.expires_at) {
-                return { valid: false, error: '❌ Mã voucher đã hết hạn sử dụng.' };
-            }
+        if (voucher.used_count >= voucher.max_uses) {
+            return { success: false, error: 'Mã voucher này đã hết lượt sử dụng.' };
         }
 
-        if (voucher.max_usages > 0 && voucher.used_count >= voucher.max_usages) {
-            return { valid: false, error: '❌ Mã voucher đã hết lượt sử dụng.' };
+        const used = db.prepare('SELECT * FROM voucher_uses WHERE voucher_id = ? AND user_id = ?')
+                       .get(voucher.id, userId);
+        
+        if (used) {
+            return { success: false, error: 'Bạn đã sử dụng mã voucher này rồi.' };
         }
-
-        const usageCheck = db.prepare(`
-            SELECT COUNT(*) as count FROM voucher_usages
-            WHERE voucher_id = ? AND telegram_id = ?
-        `).get(voucher.id, telegramId);
-
-        if (usageCheck.count > 0) {
-            return { valid: false, error: '❌ Bạn đã sử dụng mã voucher này rồi.' };
-        }
-
-        return { valid: true, voucher };
-    }
-
-    // Mark voucher as used by a user
-    useVoucher(code, telegramId) {
-        const voucher = this.getVoucher(code);
-        if (!voucher) return false;
-
-        const check = this.checkVoucher(code, telegramId);
-        if (!check.valid) return false;
-
-        const transaction = db.transaction(() => {
-            db.prepare(`
-                INSERT INTO voucher_usages (voucher_id, telegram_id)
-                VALUES (?, ?)
-            `).run(voucher.id, telegramId);
-
-            db.prepare(`
-                UPDATE vouchers SET used_count = used_count + 1
-                WHERE id = ?
-            `).run(voucher.id);
-        });
 
         try {
+            // Transaction to ensure atomicity
+            const transaction = db.transaction(() => {
+                // Update used count
+                db.prepare('UPDATE vouchers SET used_count = used_count + 1 WHERE id = ?').run(voucher.id);
+                // Record usage
+                db.prepare('INSERT INTO voucher_uses (voucher_id, user_id) VALUES (?, ?)').run(voucher.id, userId);
+                // Add balance
+                db.prepare('UPDATE users SET balance = balance + ? WHERE telegram_id = ?').run(voucher.amount, userId);
+            });
+
             transaction();
-            return true;
-        } catch (err) {
-            console.error('Failed to use voucher:', err.message);
-            return false;
+            return { success: true, amount: voucher.amount };
+        } catch (error) {
+            return { success: false, error: 'Đã xảy ra lỗi khi sử dụng voucher.' };
         }
     }
-}
+};
 
-module.exports = new VoucherService();
+module.exports = voucherService;

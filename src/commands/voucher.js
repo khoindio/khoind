@@ -1,47 +1,31 @@
 const voucherService = require('../services/voucherService');
-const userService = require('../services/userService');
 const { formatPrice } = require('../utils/keyboard');
 
 module.exports = (bot) => {
-    bot.command(['giftcode', 'voucher'], (ctx) => {
-        const text = ctx.message.text.split(' ');
-        const code = text[1]?.toUpperCase();
-
-        if (!code) {
+    bot.command(['voucher', 'giftcode'], (ctx) => {
+        const args = ctx.message.text.split(' ');
+        if (args.length < 2) {
             return ctx.replyWithHTML(
-                `🎁 <b>NẠP GIFTCODE</b>\n\n` +
-                `Cách dùng: <code>/giftcode [Mã_của_bạn]</code>\n` +
-                `Ví dụ: <code>/giftcode VIP100K</code>`
+                `🎁 <b>NHẬP MÃ QUÀ TẶNG (VOUCHER)</b>\n\n` +
+                `Cách dùng: <code>/voucher [MÃ_SỐ]</code>\n` +
+                `Ví dụ: <code>/voucher FREE10K</code>`
             );
         }
 
-        const telegramId = ctx.from.id;
-        
-        // Ensure user exists
-        userService.findOrCreate(ctx.from);
+        const code = args[1].toUpperCase();
+        const userId = ctx.from.id;
 
-        const check = voucherService.checkVoucher(code, telegramId);
+        const result = voucherService.redeemVoucher(userId, code);
 
-        if (!check.valid) {
-            return ctx.reply(check.error);
-        }
-
-        const voucher = check.voucher;
-        
-        // Add balance and mark as used
-        const success = voucherService.useVoucher(code, telegramId);
-        
-        if (success) {
-            userService.addBalance(telegramId, voucher.value);
-            const user = userService.get(telegramId);
-            
+        if (result.success) {
             ctx.replyWithHTML(
-                `🎉 <b>CHÚC MỪNG BẠN!</b>\n\n` +
-                `Đã nạp thành công: <b>${formatPrice(voucher.value)}</b>\n` +
-                `💰 Số dư hiện tại: <b>${formatPrice(user.balance)}</b>`
+                `✅ <b>SỬ DỤNG VOUCHER THÀNH CÔNG!</b>\n\n` +
+                `🎁 Mã: <code>${code}</code>\n` +
+                `💰 Số dư cộng thêm: <b>+${formatPrice(result.amount)}</b>\n\n` +
+                `Bấm /menu để xem số dư hiện tại.`
             );
         } else {
-            ctx.reply('❌ Đã xảy ra lỗi khi sử dụng Giftcode. Vui lòng thử lại sau.');
+            ctx.reply(`❌ Lỗi: ${result.error}`);
         }
     });
 };

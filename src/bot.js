@@ -31,6 +31,7 @@ require('./commands/nap')(bot);
 require('./commands/checkpay')(bot);
 require('./commands/support')(bot);
 require('./commands/myid')(bot);
+require('./commands/voucher')(bot);
 
 // Register handlers
 require('./handlers/productSelect')(bot);
@@ -44,6 +45,7 @@ bot.telegram.setMyCommands([
     { command: 'menu', description: '👤 Thông tin tài khoản' },
     { command: 'product', description: '📦 Danh sách sản phẩm' },
     { command: 'nap', description: '💰 Nạp số dư' },
+    { command: 'voucher', description: '🎁 Nhập mã quà tặng' },
     { command: 'checkpay', description: '🔍 Kiểm tra thanh toán' },
     { command: 'support', description: '🆘 Hỗ trợ' },
     { command: 'myid', description: '🆔 Lấy ID của bạn' },

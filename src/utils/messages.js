@@ -12,6 +12,7 @@ const messages = {
         `/menu — 👤 Thông tin tài khoản\n` +
         `/product — 📦 Danh sách sản phẩm\n` +
         `/nap — 💰 Nạp số dư\n` +
+        `/voucher — 🎁 Nhập mã quà tặng\n` +
         `/checkpay — 🔍 Kiểm tra thanh toán\n` +
         `/support — 🆘 Hỗ trợ\n` +
         `/myid — 🆔 Lấy ID của bạn`,

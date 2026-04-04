@@ -2,6 +2,7 @@ const config = require('../config');
 const orderService = require('../services/orderService');
 const productService = require('../services/productService');
 const userService = require('../services/userService');
+const voucherService = require('../services/voucherService');
 const { deliverOrder } = require('./paymentConfirm');
 const { formatPrice } = require('../utils/keyboard');
 const { Markup } = require('telegraf');
@@ -54,6 +55,10 @@ module.exports = (bot) => {
             `/confirm [orderID] — Xác nhận & giao hàng\n` +
             `/cancelorder [orderID] — Hủy đơn\n` +
             `/orders — Xem tất cả đơn hàng\n\n` +
+            `🎁 <b>VOUCHER / GIFTCODE:</b>\n` +
+            `/addvoucher [code] [giá trị] [số lần] — Tạo mã\n` +
+            `/vouchers — Xem danh sách mã\n` +
+            `/deletevoucher [code] — Xóa mã\n\n` +
             `🏦 <b>CÀI ĐẶT:</b>\n` +
             `/setbank — Xem thông tin ngân hàng\n` +
             `/setshop — Xem/sửa thông tin shop\n\n` +
@@ -674,6 +679,61 @@ module.exports = (bot) => {
 
         ctx.replyWithHTML(`📢 <b>Đã gửi xong!</b>\n├ ✅ Thành công: ${sent}\n└ ❌ Thất bại: ${failed}`);
     }
+
+    // ═══════════════════════════════════════
+    // VOUCHERS
+    // ═══════════════════════════════════════
+    bot.command('addvoucher', adminOnly, (ctx) => {
+        const args = ctx.message.text.split(' ').slice(1);
+        if (args.length < 2) {
+            return ctx.replyWithHTML(`❌ <b>Sai cú pháp!</b>\nCách dùng: <code>/addvoucher [MÃ] [SỐ_TIỀN] [SỐ_LƯỢT_DÙNG]</code>\n\nVí dụ: <code>/addvoucher FREE10K 10000 50</code>\n(Tạo mã FREE10K trị giá 10k, dùng được 50 lần)`);
+        }
+
+        const code = args[0].toUpperCase();
+        const amount = parseInt(args[1]);
+        const maxUses = args[2] ? parseInt(args[2]) : 1;
+
+        if (isNaN(amount) || amount <= 0 || isNaN(maxUses) || maxUses <= 0) {
+            return ctx.reply('❌ Số tiền và số lượt dùng phải là số nguyên dương.');
+        }
+
+        const result = voucherService.createVoucher(code, amount, maxUses);
+        if (result.success) {
+            ctx.replyWithHTML(`✅ <b>Tạo mã thành công!</b>\n\n🎁 Mã: <code>${code}</code>\n💰 Giá trị: ${formatPrice(amount)}\n🔁 Số lượt: ${maxUses}`);
+        } else {
+            ctx.reply(`❌ Lỗi: ${result.error}`);
+        }
+    });
+
+    bot.command('vouchers', adminOnly, (ctx) => {
+        const vouchers = voucherService.getVouchers();
+        if (vouchers.length === 0) {
+            return ctx.reply('📂 Không có mã voucher nào.');
+        }
+
+        let msg = `🎁 <b>DANH SÁCH VOUCHER</b>\n\n`;
+        vouchers.forEach((v) => {
+            const status = v.used_count >= v.max_uses ? '❌ Đã hết' : '✅ Đang chạy';
+            msg += `🎟 <code>${v.code}</code>\n`;
+            msg += `├ 💰 Giá trị: ${formatPrice(v.amount)}\n`;
+            msg += `├ 🔁 Lượt dùng: ${v.used_count}/${v.max_uses}\n`;
+            msg += `└ 📊 Trạng thái: ${status}\n\n`;
+        });
+        msg += `🗑 Xóa mã: <code>/deletevoucher [MÃ]</code>`;
+        ctx.replyWithHTML(msg);
+    });
+
+    bot.command('deletevoucher', adminOnly, (ctx) => {
+        const code = ctx.message.text.split(' ')[1];
+        if (!code) return ctx.reply('❌ Nhập mã cần xóa. Ví dụ: /deletevoucher FREE10K');
+
+        const success = voucherService.deleteVoucher(code.toUpperCase());
+        if (success) {
+            ctx.reply(`✅ Đã xóa mã ${code.toUpperCase()}`);
+        } else {
+            ctx.reply(`❌ Không tìm thấy mã ${code.toUpperCase()}`);
+        }
+    });
 };
 
 // Export setAdminState so other handlers can set admin state

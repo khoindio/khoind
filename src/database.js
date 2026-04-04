@@ -70,6 +70,24 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(telegram_id),
     FOREIGN KEY (product_id) REFERENCES products(id)
   );
+
+  CREATE TABLE IF NOT EXISTS vouchers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    amount INTEGER NOT NULL,
+    max_uses INTEGER DEFAULT 1,
+    used_count INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS voucher_uses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    voucher_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    used_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (voucher_id) REFERENCES vouchers(id),
+    FOREIGN KEY (user_id) REFERENCES users(telegram_id)
+  );
 `);
 
 // Safe migrations for existing databases
