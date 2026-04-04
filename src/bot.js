@@ -1,5 +1,6 @@
 const { Telegraf, session } = require('telegraf');
 const config = require('./config');
+const express = require('express');
 
 // Validate token
 if (!config.BOT_TOKEN || config.BOT_TOKEN === 'your_bot_token_here') {
@@ -47,6 +48,18 @@ bot.telegram.setMyCommands([
     { command: 'support', description: '🆘 Hỗ trợ' },
     { command: 'myid', description: '🆔 Lấy ID của bạn' },
 ]);
+
+// Add express server for Render health checks
+const app = express();
+const PORT = process.env.PORT || config.WEBHOOK_PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('Bot is running!');
+});
+
+app.listen(PORT, () => {
+    console.log(`🌐 Web server running on port ${PORT}`);
+});
 
 // Launch bot
 bot.launch()
