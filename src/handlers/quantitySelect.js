@@ -24,12 +24,21 @@ module.exports = (bot) => {
             return ctx.answerCbQuery(`❌ Chỉ còn ${availableStock} sản phẩm`);
         }
 
+        const user = userService.findOrCreate(ctx.from);
+        const totalPrice = product.price * quantity;
+
+        if (user.balance >= totalPrice) {
+            ctx.answerCbQuery('⏳ Đang tạo đơn hàng bằng số dư...');
+            await createOrderAndPay(ctx, bot, product, quantity, 0);
+            return;
+        }
+
         const banks = paymentService.getBanks();
 
         if (banks.length > 1) {
             // Multiple banks → show bank selection
             ctx.answerCbQuery();
-            const totalPrice = product.price * quantity;
+            const amountToPay = totalPrice - (user.balance > 0 ? user.balance : 0);
             const bankButtons = banks.map((b, i) =>
                 [Markup.button.callback(`🏦 ${b.NAME}`, `bank_${productId}_${quantity}_${i}`)]
             );
@@ -38,8 +47,9 @@ module.exports = (bot) => {
             ctx.replyWithHTML(
                 `📦 <b>${product.name}</b>\n` +
                 `📊 Số lượng: ${quantity}\n` +
-                `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n\n` +
-                `🏦 Chọn ngân hàng thanh toán:`,
+                `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n` +
+                (user.balance > 0 ? `💎 Số dư hiện có: <b>${formatPrice(user.balance)}</b>\n💵 Cần thanh toán thêm: <b>${formatPrice(amountToPay)}</b>\n\n` : `\n`) +
+                `🏦 Chọn ngân hàng thanh toán phần còn lại:`,
                 Markup.inlineKeyboard(bankButtons)
             );
         } else {
@@ -73,30 +83,97 @@ module.exports = (bot) => {
     // Shared: Create order + send QR + notify admin
     // ════════════════════════════════════
     async function createOrderAndPay(ctx, bot, product, quantity, bankIndex) {
-        userService.findOrCreate(ctx.from);
+        const user = userService.findOrCreate(ctx.from);
 
         const totalPrice = product.price * quantity;
-        const payment = paymentService.generatePayment(totalPrice, bankIndex);
+        
+        let balanceUsed = 0;
+        let amountToPay = totalPrice;
+
+        if (user.balance > 0) {
+            balanceUsed = Math.min(user.balance, totalPrice);
+            amountToPay = totalPrice - balanceUsed;
+        }
+
+        // Deduct balance immediately
+        if (balanceUsed > 0) {
+            userService.deductBalance(ctx.from.id, balanceUsed);
+        }
+
+        if (amountToPay === 0) {
+            // Full payment with balance
+            const order = orderService.create(
+                ctx.from.id,
+                product.id,
+                quantity,
+                totalPrice,
+                `BAL_${Date.now()}`,
+                balanceUsed
+            );
+            
+            orderService.markPaid(order.id);
+            
+            await ctx.replyWithHTML(
+                `✅ <b>Thanh toán thành công bằng Số dư!</b>\n\n` +
+                `📦 Sản phẩm: ${product.name}\n` +
+                `📊 Số lượng: ${quantity}\n` +
+                `💰 Đã trừ số dư: <b>${formatPrice(balanceUsed)}</b>\n\n` +
+                `⏳ Đang tự động giao hàng...`
+            );
+
+            // Attempt auto delivery
+            const realStock = productService.getAvailableStock(order.product_id, order.quantity);
+            if (realStock.length >= order.quantity) {
+                const { deliverOrder } = require('./paymentConfirm');
+                await deliverOrder(bot, order.id);
+            } else {
+                // Notify admin for manual delivery
+                const adminMsg = 
+                    `🔔 <b>ĐƠN HÀNG MỚI #${order.id} (SỐ DƯ)</b>\n\n` +
+                    `👤 Khách: <code>${ctx.from.id}</code>\n` +
+                    `📦 Sản phẩm: <b>${product.name}</b>\n` +
+                    `📊 Số lượng: ${quantity}\n` +
+                    `💰 Thanh toán: <b>FULL SỐ DƯ</b>\n\n` +
+                    `⚠️ Hết kho! Vui lòng cung cấp KEY thủ công.`;
+                
+                try {
+                    await bot.telegram.sendMessage(config.ADMIN_ID, adminMsg, {
+                        parse_mode: 'HTML',
+                        ...Markup.inlineKeyboard([
+                            [
+                                Markup.button.callback(`✅ Xác nhận #${order.id}`, `admin_confirm_${order.id}`),
+                                Markup.button.callback(`❌ Hủy #${order.id}`, `admin_cancel_${order.id}`)
+                            ]
+                        ])
+                    });
+                } catch(e) {}
+            }
+            return;
+        }
+
+        const payment = paymentService.generatePayment(amountToPay, bankIndex);
 
         const order = orderService.create(
             ctx.from.id,
             product.id,
             quantity,
             totalPrice,
-            payment.paymentCode
+            payment.paymentCode,
+            balanceUsed
         );
 
         // 1. Send QR code to customer
         const caption =
-            `⏳ <b>Đang chờ thanh toán ${formatPrice(totalPrice)}...</b>\n\n` +
+            `⏳ <b>Đang chờ thanh toán...</b>\n\n` +
             `Quét mã QR phía trên để chuyển khoản.\n\n` +
             `💰 <b>THANH TOÁN ĐƠN HÀNG</b>\n\n` +
             `📦 Sản phẩm: ${product.name}\n` +
             `📊 Số lượng: ${quantity}\n` +
-            `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n\n` +
+            `💵 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n` +
+            (balanceUsed > 0 ? `💎 Đã trừ số dư: <b>-${formatPrice(balanceUsed)}</b>\n` : '') +
             `━━━━━━━━━━━━━━━━━\n\n` +
             `🏦 Quét mã QR để chuyển khoản\n` +
-            `├ Số tiền: <b>${formatPrice(totalPrice)}</b>\n` +
+            `├ Số tiền: <b>${formatPrice(amountToPay)}</b>\n` +
             `└ Nội dung CK: <code>${payment.paymentCode}</code>\n\n` +
             `⏰ QR hiệu lực trong <b>15 phút</b>\n` +
             `🚫 <b>KHÔNG</b> thay đổi nội dung chuyển khoản\n` +
@@ -120,6 +197,8 @@ module.exports = (bot) => {
             `📦 Sản phẩm: <b>${product.name}</b>\n` +
             `📊 Số lượng: ${quantity}\n` +
             `💰 Tổng tiền: <b>${formatPrice(totalPrice)}</b>\n` +
+            (balanceUsed > 0 ? `💎 Đã trừ số dư: <b>${formatPrice(balanceUsed)}</b>\n` : '') +
+            `💵 Cần CK: <b>${formatPrice(amountToPay)}</b>\n` +
             `🏦 Bank: <b>${payment.bankName}</b>\n` +
             `🔑 Mã CK: <code>${payment.paymentCode}</code>\n\n` +
             `━━━━━━━━━━━━━━━━━\n` +

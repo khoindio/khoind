@@ -5,11 +5,11 @@ const orderService = {
   /**
    * Create a new order
    */
-  create(userId, productId, quantity, totalPrice, paymentCode) {
+  create(userId, productId, quantity, totalPrice, paymentCode, balanceUsed = 0) {
     const result = db.prepare(`
-      INSERT INTO orders (user_id, product_id, quantity, total_price, payment_code, status)
-      VALUES (?, ?, ?, ?, ?, 'pending')
-    `).run(userId, productId, quantity, totalPrice, paymentCode);
+      INSERT INTO orders (user_id, product_id, quantity, total_price, payment_code, status, balance_used)
+      VALUES (?, ?, ?, ?, ?, 'pending', ?)
+    `).run(userId, productId, quantity, totalPrice, paymentCode, balanceUsed);
 
     return this.getById(result.lastInsertRowid);
   },
@@ -126,7 +126,15 @@ const orderService = {
    * Cancel order
    */
   cancel(orderId) {
-    db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ? AND status = 'pending'").run(orderId);
+    const order = this.getById(orderId);
+    if (!order || order.status !== 'pending') return;
+
+    db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?").run(orderId);
+    
+    // Refund balance if used
+    if (order.balance_used && order.balance_used > 0) {
+        db.prepare('UPDATE users SET balance = balance + ? WHERE telegram_id = ?').run(order.balance_used, order.user_id);
+    }
   },
 
   /**

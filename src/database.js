@@ -93,6 +93,7 @@ db.exec(`
 // Safe migrations for existing databases
 try { db.exec('ALTER TABLE products ADD COLUMN contact_url TEXT'); } catch (e) { /* already exists */ }
 try { db.exec('ALTER TABLE products ADD COLUMN sheet_stock INTEGER DEFAULT 0'); } catch (e) { /* already exists */ }
+try { db.exec('ALTER TABLE orders ADD COLUMN balance_used INTEGER DEFAULT 0'); } catch (e) { /* already exists */ }
 
 // Seed data - only if categories table is empty
 const catCount = db.prepare('SELECT COUNT(*) as c FROM categories').get();
