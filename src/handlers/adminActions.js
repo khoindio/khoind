@@ -66,7 +66,9 @@ module.exports = (bot) => {
             `/sync — 🔄 Đồng bộ sản phẩm từ Google Sheet\n` +
             `/stats — Thống kê chi tiết\n` +
             `/users — Xem danh sách users\n` +
-            `/broadcast — Gửi thông báo tới all users`,
+            `/broadcast — Gửi thông báo tới all users\n` +
+            `/addmoney [ID] [số tiền] — Cộng tiền cho user\n` +
+            `/trutien [ID] [số tiền] — Trừ tiền của user`,
             Markup.inlineKeyboard([
                 [Markup.button.callback('📦 Sản phẩm', 'adm_products'), Markup.button.callback('⏳ Đơn chờ', 'adm_pending')],
                 [Markup.button.callback('🔄 Sync Sheet', 'adm_sync'), Markup.button.callback('📊 Thống kê', 'adm_stats')],
@@ -463,6 +465,99 @@ module.exports = (bot) => {
         });
 
         ctx.replyWithHTML(text);
+    });
+
+    // /addmoney [ID] [amount] - Cộng tiền cho user
+    bot.command('addmoney', adminOnly, async (ctx) => {
+        const argsText = ctx.message.text.replace('/addmoney', '').trim();
+        const parts = argsText.split(' ').map((s) => s.trim()).filter(Boolean);
+
+        if (parts.length < 2) {
+            return ctx.replyWithHTML(
+                `❌ <b>Sai cú pháp!</b>\n` +
+                `Cách dùng: <code>/addmoney [ID_USER] [SỐ_TIỀN]</code>\n\n` +
+                `Ví dụ: <code>/addmoney 123456789 50000</code>`
+            );
+        }
+
+        const userId = parseInt(parts[0]);
+        const amount = parseInt(parts[1]);
+
+        if (isNaN(userId) || isNaN(amount) || amount <= 0) {
+            return ctx.reply('❌ ID user và số tiền phải là số hợp lệ (số tiền > 0).');
+        }
+
+        const user = userService.get(userId);
+        if (!user) {
+            return ctx.reply('❌ Không tìm thấy user với ID này trong hệ thống.');
+        }
+
+        // Cộng số dư
+        userService.addBalance(userId, amount);
+        const updatedUser = userService.get(userId);
+
+        // Thông báo cho admin
+        ctx.replyWithHTML(
+            `✅ <b>Cộng tiền thành công!</b>\n\n` +
+            `👤 User: <code>${updatedUser.telegram_id}</code> | ${updatedUser.full_name}\n` +
+            `💰 Đã cộng: <b>+${formatPrice(amount)}</b>\n` +
+            `💎 Số dư mới: <b>${formatPrice(updatedUser.balance)}</b>`
+        );
+
+        // Gửi tin nhắn thông báo cho user
+        try {
+            await ctx.telegram.sendMessage(
+                userId,
+                `🎉 <b>NẠP TIỀN THÀNH CÔNG</b>\n\n` +
+                `💰 Bạn vừa được quản trị viên cộng thêm <b>${formatPrice(amount)}</b> vào tài khoản.\n` +
+                `💎 Số dư hiện tại: <b>${formatPrice(updatedUser.balance)}</b>\n\n` +
+                `Cảm ơn bạn đã sử dụng dịch vụ!`,
+                { parse_mode: 'HTML' }
+            );
+        } catch (e) {
+            ctx.reply('⚠️ Không thể gửi thông báo cho user (có thể user đã chặn bot).');
+        }
+    });
+
+    // /trutien [ID] [amount] - Trừ tiền của user
+    bot.command('trutien', adminOnly, async (ctx) => {
+        const argsText = ctx.message.text.replace('/trutien', '').trim();
+        const parts = argsText.split(' ').map((s) => s.trim()).filter(Boolean);
+
+        if (parts.length < 2) {
+            return ctx.replyWithHTML(
+                `❌ <b>Sai cú pháp!</b>\n` +
+                `Cách dùng: <code>/trutien [ID_USER] [SỐ_TIỀN]</code>`
+            );
+        }
+
+        const userId = parseInt(parts[0]);
+        const amount = parseInt(parts[1]);
+
+        if (isNaN(userId) || isNaN(amount) || amount <= 0) {
+            return ctx.reply('❌ ID user và số tiền phải là số hợp lệ (số tiền > 0).');
+        }
+
+        const user = userService.get(userId);
+        if (!user) {
+            return ctx.reply('❌ Không tìm thấy user với ID này trong hệ thống.');
+        }
+
+        // Trừ số dư
+        const success = userService.deductBalance(userId, amount);
+        if (!success) {
+            return ctx.reply('❌ Lỗi: User không đủ số dư để trừ.');
+        }
+
+        const updatedUser = userService.get(userId);
+
+        // Thông báo cho admin
+        ctx.replyWithHTML(
+            `✅ <b>Trừ tiền thành công!</b>\n\n` +
+            `👤 User: <code>${updatedUser.telegram_id}</code> | ${updatedUser.full_name}\n` +
+            `💰 Đã trừ: <b>-${formatPrice(amount)}</b>\n` +
+            `💎 Số dư mới: <b>${formatPrice(updatedUser.balance)}</b>`
+        );
     });
 
     // /broadcast - Send message to all users
