@@ -95,10 +95,10 @@ module.exports = (bot) => {
                     (p.promotion ? '<div class="badge">HOT</div>' : '') +
                     '<div class="icon">' + (p.emoji || '📦') + '</div>' +
                     '<div class="name">' + p.name + '</div>' +
-                    '<div class="desc">' + (p.description || 'Premium Asset') + '</div>' +
+                    '<div class="desc">' + (p.description || 'Sản phẩm chất lượng') + '</div>' +
                     '<div class="foot">' +
                         '<div class="price">' + price + '</div>' +
-                        '<button class="btn" onclick="buy(' + p.id + ')">GET</button>' +
+                        '<button class="btn" onclick="buy(' + p.id + ')">MUA</button>' +
                     '</div>' +
                 '</div>';
         });
@@ -168,6 +168,17 @@ module.exports = (bot) => {
                             require('./handlers/paymentConfirm').deliverOrder(bot, order.id);
                         }
                     }
+                }
+            }
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ error: e.message }); }
+    });
+
+    app.listen(config.WEBHOOK_PORT, () => {
+        console.log('🌐 Server running on port ' + config.WEBHOOK_PORT);
+    });
+};
+     }
                 }
             }
             res.json({ success: true });
