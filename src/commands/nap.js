@@ -9,7 +9,7 @@ module.exports = (bot) => {
             return ctx.replyWithHTML(
                 '💰 <b>NẠP SỐ DƯ</b>\n\n' +
                 'Cách dùng: /nap [số tiền]\n' +
-                'Ví dụ: /nap 100000\n\n' +
+                'Ví dụ: /nap 50000\n\n' +
                 '💡 Số tiền tối thiểu: 10.000đ'
             );
         }
@@ -19,7 +19,7 @@ module.exports = (bot) => {
             return ctx.reply('❌ Số tiền tối thiểu là 10.000đ');
         }
 
-        const payment = paymentService.generatePayment(amount);
+        const payment = paymentService.generatePayment(amount, 0, ctx.from.id);
 
         // Send QR image
         ctx.replyWithPhoto(payment.qrUrl, {
