@@ -178,14 +178,3 @@ module.exports = (bot) => {
         console.log('🌐 Server running on port ' + config.WEBHOOK_PORT);
     });
 };
-     }
-                }
-            }
-            res.json({ success: true });
-        } catch (e) { res.status(500).json({ error: e.message }); }
-    });
-
-    app.listen(config.WEBHOOK_PORT, () => {
-        console.log('🌐 Server running on port ' + config.WEBHOOK_PORT);
-    });
-};
