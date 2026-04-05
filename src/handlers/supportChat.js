@@ -1,8 +1,8 @@
 const config = require('../config');
 
 module.exports = (bot) => {
-    // Listen for text, photo, document to handle support chat flows
-    bot.on(['text', 'photo', 'document'], async (ctx, next) => {
+    // Listen for text, photo, document, video to handle support chat flows
+    bot.on(['text', 'photo', 'document', 'video'], async (ctx, next) => {
         if (!ctx.message) return next();
 
         const userId = ctx.from.id;
@@ -27,6 +27,8 @@ module.exports = (bot) => {
                         await bot.telegram.sendPhoto(targetUserId, ctx.message.photo[ctx.message.photo.length - 1].file_id, { caption: '💬 <b>Phản hồi từ Admin (Ảnh)</b>', parse_mode: 'HTML' });
                     } else if (ctx.message.document) {
                         await bot.telegram.sendDocument(targetUserId, ctx.message.document.file_id, { caption: '💬 <b>Phản hồi từ Admin (File)</b>', parse_mode: 'HTML' });
+                    } else if (ctx.message.video) {
+                        await bot.telegram.sendVideo(targetUserId, ctx.message.video.file_id, { caption: '💬 <b>Phản hồi từ Admin (Video)</b>', parse_mode: 'HTML' });
                     }
                     
                     await ctx.reply('✅ Đã gửi phản hồi cho khách hàng!');

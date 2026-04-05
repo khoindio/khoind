@@ -806,7 +806,7 @@ module.exports = (bot) => {
     // ═══════════════════════════════════════
     // MULTI-STEP ADMIN FLOWS
     // ═══════════════════════════════════════
-    bot.on(['text', 'document', 'photo'], async (ctx, next) => {
+    bot.on(['text', 'document', 'photo', 'video'], async (ctx, next) => {
         if (!isAdmin(ctx)) return next();
 
         const state = adminState[ctx.from.id];
@@ -819,18 +819,25 @@ module.exports = (bot) => {
 
             if (product && product.is_file) {
                 let fileId = null;
+                let fileType = 'document';
+
                 if (ctx.message.document) {
                     fileId = ctx.message.document.file_id;
+                    fileType = 'document';
                 } else if (ctx.message.photo) {
                     fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+                    fileType = 'photo';
+                } else if (ctx.message.video) {
+                    fileId = ctx.message.video.file_id;
+                    fileType = 'video';
                 } else if (ctx.message.text) {
                     if (ctx.message.text.startsWith('/')) return next();
-                    return ctx.reply('⚠️ Sản phẩm này yêu cầu FILE hoặc ẢNH. Gửi file để thêm vào kho hoặc gõ /cancel để kết thúc.');
+                    return ctx.reply('⚠️ Sản phẩm này yêu cầu FILE, ẢNH hoặc VIDEO. Gửi file để thêm vào kho hoặc gõ /cancel để kết thúc.');
                 }
                 
                 if (fileId) {
                     const caption = ctx.message.caption || '';
-                    const stockData = caption ? `${fileId}|${caption}` : fileId;
+                    const stockData = caption ? `${fileType}:${fileId}|${caption}` : `${fileType}:${fileId}`;
                     itemsToAdd = [stockData];
                 }
             } else {
