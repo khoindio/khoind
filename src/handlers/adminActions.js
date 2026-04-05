@@ -1091,15 +1091,3 @@ module.exports = (bot) => {
 module.exports.setAdminState = (userId, state) => {
     adminState[userId] = state;
 };
-ed++;
-            }
-        }
-
-        ctx.replyWithHTML(`📢 <b>Đã gửi xong!</b>\n├ ✅ Thành công: ${sent}\n└ ❌ Thất bại: ${failed}`);
-    }
-};
-
-// Export setAdminState so other handlers can set admin state
-module.exports.setAdminState = (userId, state) => {
-    adminState[userId] = state;
-};
