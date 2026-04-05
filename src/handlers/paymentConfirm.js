@@ -74,8 +74,21 @@ async function resendOrderContent(bot, userId, orderId) {
             for (let i = 0; i < keys.length; i++) {
                 const stockData = keys[i];
                 const parts = stockData.split('|');
-                const fileId = parts[0];
-                const captionText = parts.length > 1 ? parts[1] : '';
+                let fileIdRaw = parts[0];
+                const captionText = parts.length > 1 ? parts.slice(1).join('|') : '';
+                
+                let type = 'document';
+                let fileId = fileIdRaw;
+                if (fileIdRaw.startsWith('video:')) {
+                    type = 'video';
+                    fileId = fileIdRaw.substring(6);
+                } else if (fileIdRaw.startsWith('photo:')) {
+                    type = 'photo';
+                    fileId = fileIdRaw.substring(6);
+                } else if (fileIdRaw.startsWith('document:')) {
+                    type = 'document';
+                    fileId = fileIdRaw.substring(9);
+                }
                 
                 const isLastFile = i === keys.length - 1;
                 let finalCaption = '';
@@ -95,11 +108,13 @@ async function resendOrderContent(bot, userId, orderId) {
 
                 const extraOpts = isLastFile ? { ...postDeliveryKeyboard(), caption: finalCaption } : { caption: finalCaption };
                 
-                await bot.telegram.sendDocument(
-                    userId,
-                    fileId,
-                    { ...extraOpts, parse_mode: 'HTML' }
-                );
+                if (type === 'video') {
+                    await bot.telegram.sendVideo(userId, fileId, { ...extraOpts, parse_mode: 'HTML' });
+                } else if (type === 'photo') {
+                    await bot.telegram.sendPhoto(userId, fileId, { ...extraOpts, parse_mode: 'HTML' });
+                } else {
+                    await bot.telegram.sendDocument(userId, fileId, { ...extraOpts, parse_mode: 'HTML' });
+                }
             }
         } else {
             // Send text account details

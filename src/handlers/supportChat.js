@@ -51,6 +51,8 @@ module.exports = (bot) => {
                         await bot.telegram.sendPhoto(adminId, ctx.message.photo[ctx.message.photo.length - 1].file_id, { caption: header + `🖼 Gửi kèm ảnh`, parse_mode: 'HTML' }).catch(() => {});
                     } else if (ctx.message.document) {
                         await bot.telegram.sendDocument(adminId, ctx.message.document.file_id, { caption: header + `📄 Gửi kèm tài liệu`, parse_mode: 'HTML' }).catch(() => {});
+                    } else if (ctx.message.video) {
+                        await bot.telegram.sendVideo(adminId, ctx.message.video.file_id, { caption: header + `🎥 Gửi kèm video`, parse_mode: 'HTML' }).catch(() => {});
                     }
                 }
                 

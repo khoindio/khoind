@@ -417,7 +417,7 @@ module.exports = (bot) => {
         const newValue = currentValue ? 0 : 1;
         db.prepare('UPDATE products SET is_file = ? WHERE id = ?').run(newValue, productId);
         
-        ctx.replyWithHTML(`🔄 Đã chuyển sản phẩm <b>${product.name}</b> thành dạng: ${newValue ? '<b>FILE/DOCUMENT</b>' : '<b>TEXT/KEY</b>'}`);
+        ctx.replyWithHTML(`🔄 Đã chuyển sản phẩm <b>${product.name}</b> thành dạng: ${newValue ? '<b>FILE/ẢNH/VIDEO</b>' : '<b>TEXT/KEY</b>'}`);
     });
 
     // ═══════════════════════════════════════
@@ -1080,6 +1080,18 @@ module.exports = (bot) => {
                 sent++;
             } catch (err) {
                 failed++;
+            }
+        }
+
+        ctx.replyWithHTML(`📢 <b>Đã gửi xong!</b>\n├ ✅ Thành công: ${sent}\n└ ❌ Thất bại: ${failed}`);
+    }
+};
+
+// Export setAdminState so other handlers can set admin state
+module.exports.setAdminState = (userId, state) => {
+    adminState[userId] = state;
+};
+ed++;
             }
         }
 
